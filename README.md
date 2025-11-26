@@ -3,37 +3,47 @@
 A small service that receives events from the AT firehose and produces them to Kafka. Supports standard JSON outputs as well as [Osprey](https://github.com/roostorg/osprey)
 formatted events.
 
-## Installation
-
-```bash
-go install github.com/haileyok/at-kafka/cmd/atkafka@latest
-```
-
-Or build from source:
-
-```bash
-git clone https://github.com/haileyok/at-kafka.git
-cd at-kafka
-go build -o atkafka ./cmd/atkafka
-```
-
 ## Usage
 
-### Basic Usage
+### Docker Compose
 
-```bash
-atkafka \
-  --bootstrap-servers localhost:9092 \
-  --output-topic atproto-events
+The included `docker-compose.yml` provides a complete local stack. Edit the environment variables in the file to customize:
+
+```yaml
+environment:
+  ATKAFKA_RELAY_HOST: "wss://bsky.network"
+  ATKAFKA_BOOTSTRAP_SERVERS: "kafka:29092"
+  ATKAFKA_OUTPUT_TOPIC: "atproto-events"
+  ATKAFKA_OSPREY_COMPATIBLE: "false"
 ```
 
-### With Osprey Event Formatting
+Then start:
 
 ```bash
-atkafka \
-  --bootstrap-servers localhost:9092 \
-  --output-topic atproto-events \
-  --osprey-compatible
+docker compose up -d        # Start services
+```
+
+### Docker Run
+
+For standard mode:
+
+```bash
+docker run -d \
+  -e ATKAFKA_BOOTSTRAP_SERVERS=kafka:9092 \
+  -e ATKAFKA_OUTPUT_TOPIC=atproto-events \
+  -p 2112:2112 \
+  ghcr.io/haileyok/at-kafka:latest
+```
+
+For Osprey-compatible mode:
+
+```bash
+docker run -d \
+  -e ATKAFKA_BOOTSTRAP_SERVERS=kafka:9092 \
+  -e ATKAFKA_OUTPUT_TOPIC=atproto-events \
+  -e ATKAFKA_OSPREY_COMPATIBLE=true \
+  -p 2112:2112 \
+  ghcr.io/haileyok/at-kafka:latest
 ```
 
 ## Configuration
