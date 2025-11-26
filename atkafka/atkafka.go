@@ -155,6 +155,7 @@ func (s *Server) Run(ctx context.Context) error {
 type EventMetadata struct {
 	DidDocument  *identity.DIDDocument `json:"didDocument,omitempty"`
 	PdsHost      string                `json:"pdsHost,omitempty"`
+	Handle       string                `json:"handle,omitempty"`
 	DidCreatedAt string                `json:"didCreatedAt,omitempty"`
 	AccountAge   int64                 `json:"accountAge"`
 }
@@ -162,6 +163,7 @@ type EventMetadata struct {
 func (s *Server) FetchEventMetadata(ctx context.Context, did string) (*EventMetadata, error) {
 	var didDocument *identity.DIDDocument
 	var pdsHost string
+	var handle string
 	var didCreatedAt string
 	accountAge := int64(-1)
 
@@ -180,6 +182,13 @@ func (s *Server) FetchEventMetadata(ctx context.Context, did string) (*EventMeta
 			for _, svc := range doc.Service {
 				if svc.ID == "#atproto_pds" {
 					pdsHost = svc.ServiceEndpoint
+					break
+				}
+			}
+
+			for _, aka := range doc.AlsoKnownAs {
+				if strings.HasPrefix(aka, "at://") {
+					handle = strings.TrimPrefix(aka, "at://")
 					break
 				}
 			}
@@ -210,6 +219,7 @@ func (s *Server) FetchEventMetadata(ctx context.Context, did string) (*EventMeta
 	return &EventMetadata{
 		DidDocument:  didDocument,
 		PdsHost:      pdsHost,
+		Handle:       handle,
 		DidCreatedAt: didCreatedAt,
 		AccountAge:   accountAge,
 	}, nil
