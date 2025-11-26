@@ -36,6 +36,10 @@ func main() {
 				EnvVars: []string{"ATKAFKA_OSPREY_COMPATIBLE"},
 				Value:   false,
 			},
+			&cli.StringFlag{
+				Name:    "plc-host",
+				EnvVars: []string{"ATKAFKA_PLC_HOST"},
+			},
 		},
 		Action: func(cmd *cli.Context) error {
 			ctx := context.Background()
@@ -48,6 +52,7 @@ func main() {
 				BootstrapServers: cmd.StringSlice("bootstrap-servers"),
 				OutputTopic:      cmd.String("output-topic"),
 				OspreyCompat:     cmd.Bool("osprey-compatible"),
+				PlcHost:          cmd.String("plc-host"),
 				Logger:           logger,
 			})
 

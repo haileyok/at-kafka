@@ -50,6 +50,7 @@ services:
       ATKAFKA_BOOTSTRAP_SERVERS: "kafka:29092"
       ATKAFKA_OUTPUT_TOPIC: "atproto-events"
       ATKAFKA_OSPREY_COMPATIBLE: "false"
+      ATKAFKA_PLC_HOST: "https://plc.directory"
     restart: unless-stopped
 
 volumes:

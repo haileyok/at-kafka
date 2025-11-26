@@ -11,10 +11,12 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/bluesky-social/indigo/atproto/atdata"
+	"github.com/bluesky-social/indigo/atproto/identity"
 	"github.com/bluesky-social/indigo/events"
 	"github.com/bluesky-social/indigo/events/schedulers/parallel"
 	"github.com/bluesky-social/indigo/repo"
@@ -32,10 +34,13 @@ type Server struct {
 
 	atkProducer *Producer
 	ospProducer *Producer
+
+	plcClient *PlcClient
 }
 
 type ServerArgs struct {
 	RelayHost        string
+	PlcHost          string
 	BootstrapServers []string
 	OutputTopic      string
 	OspreyCompat     bool
@@ -47,8 +52,16 @@ func NewServer(args *ServerArgs) *Server {
 		args.Logger = slog.Default()
 	}
 
+	var plcClient *PlcClient
+	if args.PlcHost != "" {
+		plcClient = NewPlcClient(&PlcClientArgs{
+			PlcHost: args.PlcHost,
+		})
+	}
+
 	return &Server{
 		relayHost:        args.RelayHost,
+		plcClient:        plcClient,
 		bootstrapServers: args.BootstrapServers,
 		outputTopic:      args.OutputTopic,
 		ospreyCompat:     args.OspreyCompat,
@@ -139,7 +152,73 @@ func (s *Server) Run(ctx context.Context) error {
 	return nil
 }
 
+type EventMetadata struct {
+	DidDocument  *identity.DIDDocument `json:"didDocument,omitempty"`
+	PdsHost      string                `json:"pdsHost,omitempty"`
+	DidCreatedAt string                `json:"didCreatedAt,omitempty"`
+	AccountAge   int64                 `json:"accountAge"`
+}
+
+func (s *Server) FetchEventMetadata(ctx context.Context, did string) (*EventMetadata, error) {
+	var didDocument *identity.DIDDocument
+	var pdsHost string
+	var didCreatedAt string
+	accountAge := int64(-1)
+
+	var wg sync.WaitGroup
+
+	if s.plcClient != nil {
+		wg.Go(func() {
+			logger := s.logger.With("component", "didDoc")
+			doc, err := s.plcClient.GetDIDDoc(ctx, did)
+			if err != nil {
+				logger.Error("error fetching did doc", "did", did, "err", err)
+				return
+			}
+			didDocument = doc
+
+			for _, svc := range doc.Service {
+				if svc.ID == "#atproto_pds" {
+					pdsHost = svc.ServiceEndpoint
+					break
+				}
+			}
+		})
+
+		wg.Go(func() {
+			logger := s.logger.With("component", "auditLog")
+			auditLog, err := s.plcClient.GetDIDAuditLog(ctx, did)
+			if err != nil {
+				logger.Error("error fetching did audit log", "did", did, "err", err)
+				return
+			}
+
+			didCreatedAt = auditLog.CreatedAt
+
+			createdAt, err := time.Parse(time.RFC3339Nano, auditLog.CreatedAt)
+			if err != nil {
+				logger.Error("error parsing timestamp in audit log", "did", did, "timestamp", auditLog.CreatedAt, "err", err)
+				return
+			}
+
+			accountAge = int64(time.Since(createdAt).Seconds())
+		})
+	}
+
+	wg.Wait()
+
+	return &EventMetadata{
+		DidDocument:  didDocument,
+		PdsHost:      pdsHost,
+		DidCreatedAt: didCreatedAt,
+		AccountAge:   accountAge,
+	}, nil
+}
+
 func (s *Server) handleEvent(ctx context.Context, evt *events.XRPCStreamEvent) error {
+	dispatchCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
 	logger := s.logger.With("component", "handleEvent")
 	logger.Debug("event", "seq", evt.Sequence())
 
@@ -214,9 +293,15 @@ func (s *Server) handleEvent(ctx context.Context, evt *events.XRPCStreamEvent) e
 				Operation: &atkOp,
 			}
 
+			eventMetadata, err := s.FetchEventMetadata(dispatchCtx, evt.RepoCommit.Repo)
+			if err != nil {
+				logger.Error("error fetching event metadata", "err", err)
+			} else {
+				kafkaEvt.Metadata = eventMetadata
+			}
+
 			var kafkaEvtBytes []byte
 			if s.ospreyCompat {
-
 				// create the wrapper event for osprey
 				ospreyKafkaEvent := OspreyAtKafkaEvent{
 					Data: OspreyEventData{
@@ -291,6 +376,15 @@ func (s *Server) handleEvent(ctx context.Context, evt *events.XRPCStreamEvent) e
 			}
 		} else {
 			return fmt.Errorf("unhandled event received")
+		}
+
+		if did != "" {
+			eventMetadata, err := s.FetchEventMetadata(dispatchCtx, did)
+			if err != nil {
+				logger.Error("error fetching event metadata", "err", err)
+			} else {
+				kafkaEvt.Metadata = eventMetadata
+			}
 		}
 
 		// create the kafka event bytes
@@ -384,8 +478,9 @@ type AtKafkaAccount struct {
 }
 
 type AtKafkaEvent struct {
-	Did       string `json:"did"`
-	Timestamp string `json:"timestamp"`
+	Did       string         `json:"did"`
+	Timestamp string         `json:"timestamp"`
+	Metadata  *EventMetadata `json:"eventMetadata"`
 
 	Operation *AtKafkaOp       `json:"operation,omitempty"`
 	Account   *AtKafkaAccount  `json:"account,omitempty"`
