@@ -141,7 +141,7 @@ func (s *Server) Run(ctx context.Context) error {
 
 func (s *Server) handleEvent(ctx context.Context, evt *events.XRPCStreamEvent) error {
 	logger := s.logger.With("component", "handleEvent")
-	logger.Info("event", "seq", evt.Sequence())
+	logger.Debug("event", "seq", evt.Sequence())
 
 	var collection string
 	var actionName string
