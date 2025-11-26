@@ -16,6 +16,8 @@ func main() {
 	app := cli.App{
 		Name: "at-kafka",
 		Flags: []cli.Flag{
+			telemetry.CLIFlagDebug,
+			telemetry.CLIFlagMetricsListenAddress,
 			&cli.StringFlag{
 				Name:    "relay-host",
 				Value:   "wss://bsky.network",
