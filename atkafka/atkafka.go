@@ -32,8 +32,7 @@ type Server struct {
 	ospreyCompat     bool
 	logger           *slog.Logger
 
-	atkProducer *Producer
-	ospProducer *Producer
+	producer *Producer
 
 	plcClient *PlcClient
 }
@@ -70,12 +69,29 @@ func NewServer(args *ServerArgs) *Server {
 }
 
 func (s *Server) Run(ctx context.Context) error {
+	s.logger.Info("starting consumer", "relay-host", s.relayHost, "bootstrap-servers", s.bootstrapServers, "output-topic", s.outputTopic)
+
+	createCtx, _ := context.WithTimeout(ctx, time.Second*5)
+
+	producerLogger := s.logger.With("component", "producer")
+	kafProducer, err := NewProducer(createCtx, producerLogger, s.bootstrapServers, s.outputTopic,
+		WithEnsureTopic(true),
+		WithTopicPartitions(200),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to create producer: %w", err)
+	}
+	defer kafProducer.Close()
+	s.producer = kafProducer
+	s.logger.Info("created producer")
+
 	wsDialer := websocket.DefaultDialer
 	u, err := url.Parse(s.relayHost)
 	if err != nil {
 		return fmt.Errorf("invalid relayHost: %w", err)
 	}
 	u.Path = "/xrpc/com.atproto.sync.subscribeRepos"
+	s.logger.Info("created dialer")
 
 	wsErr := make(chan error, 1)
 	shutdownWs := make(chan struct{}, 1)
@@ -109,29 +125,7 @@ func (s *Server) Run(ctx context.Context) error {
 
 		wsErr <- nil
 	}()
-
-	producerLogger := s.logger.With("component", "producer")
-	if s.ospreyCompat {
-		kafProducer, err := NewProducer(ctx, producerLogger, s.bootstrapServers, s.outputTopic,
-			WithEnsureTopic(true),
-			WithTopicPartitions(200),
-		)
-		if err != nil {
-			return fmt.Errorf("failed to create producer: %w", err)
-		}
-		defer kafProducer.Close()
-		s.ospProducer = kafProducer
-	} else {
-		kafProducer, err := NewProducer(ctx, producerLogger, s.bootstrapServers, s.outputTopic,
-			WithEnsureTopic(true),
-			WithTopicPartitions(200),
-		)
-		if err != nil {
-			return fmt.Errorf("failed to create producer: %w", err)
-		}
-		defer kafProducer.Close()
-		s.atkProducer = kafProducer
-	}
+	s.logger.Info("created relay consumer")
 
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, syscall.SIGTERM, syscall.SIGINT)
@@ -432,30 +426,23 @@ func (s *Server) handleEvent(ctx context.Context, evt *events.XRPCStreamEvent) e
 }
 
 func (s *Server) produceAsync(ctx context.Context, key string, msg []byte) error {
-	if !s.ospreyCompat && s.atkProducer != nil {
-		if err := s.atkProducer.ProduceAsync(ctx, key, msg, func(r *kgo.Record, err error) {
-			status := "ok"
-			if err != nil {
-				status = "error"
-				s.logger.Error("error producing message", "err", err)
-			}
-			producedEvents.WithLabelValues(status).Inc()
-		}); err != nil {
+	callback := func(r *kgo.Record, err error) {
+		status := "ok"
+		if err != nil {
+			status = "error"
+			s.logger.Error("error producing message", "err", err)
+		}
+		producedEvents.WithLabelValues(status).Inc()
+	}
+
+	if !s.ospreyCompat {
+		if err := s.producer.ProduceAsync(ctx, key, msg, callback); err != nil {
 			return fmt.Errorf("failed to produce message: %w", err)
 		}
-	} else if s.ospreyCompat && s.ospProducer != nil {
-		if err := s.ospProducer.ProduceAsync(ctx, key, msg, func(r *kgo.Record, err error) {
-			status := "ok"
-			if err != nil {
-				status = "error"
-				s.logger.Error("error producing message", "err", err)
-			}
-			producedEvents.WithLabelValues(status).Inc()
-		}); err != nil {
+	} else if s.ospreyCompat {
+		if err := s.producer.ProduceAsync(ctx, key, msg, callback); err != nil {
 			return fmt.Errorf("failed to produce message: %w", err)
 		}
-	} else {
-		return fmt.Errorf("failed to produce message. no compatible producer registered.")
 	}
 
 	return nil
