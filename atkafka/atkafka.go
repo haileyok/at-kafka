@@ -71,7 +71,8 @@ func NewServer(args *ServerArgs) *Server {
 func (s *Server) Run(ctx context.Context) error {
 	s.logger.Info("starting consumer", "relay-host", s.relayHost, "bootstrap-servers", s.bootstrapServers, "output-topic", s.outputTopic)
 
-	createCtx, _ := context.WithTimeout(ctx, time.Second*5)
+	createCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
 
 	producerLogger := s.logger.With("component", "producer")
 	kafProducer, err := NewProducer(createCtx, producerLogger, s.bootstrapServers, s.outputTopic,

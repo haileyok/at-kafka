@@ -5,12 +5,24 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
-var handledEvents = promauto.NewCounterVec(prometheus.CounterOpts{
-	Namespace: "atkafka",
-	Name:      "handled_events",
-}, []string{"action_name", "collection"})
+var (
+	handledEvents = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "atkafka",
+		Name:      "handled_events",
+	}, []string{"action_name", "collection"})
 
-var producedEvents = promauto.NewCounterVec(prometheus.CounterOpts{
-	Namespace: "atkafka",
-	Name:      "produced_events",
-}, []string{"status"})
+	producedEvents = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "atkafka",
+		Name:      "produced_events",
+	}, []string{"status"})
+
+	plcRequests = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "atkafka",
+		Name:      "plc_requests",
+	}, []string{"kind", "status", "cached"})
+
+	cacheSize = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: "atkafka",
+		Name:      "cache_size",
+	}, []string{"kind"})
+)

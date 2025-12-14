@@ -50,9 +50,13 @@ func NewPlcClient(args *PlcClientArgs) *PlcClient {
 		SkipDNSDomainSuffixes: []string{".bsky.social"},
 	}
 
-	docCache := lru.NewLRU[string, *identity.DIDDocument](100_000, nil, 5*time.Minute)
+	docCache := lru.NewLRU(100_000, func(_ string, _ *identity.DIDDocument) {
+		cacheSize.WithLabelValues("did_doc").Dec()
+	}, 5*time.Minute)
 
-	auditCache := lru.NewLRU[string, *DidAuditEntry](100_000, nil, 1*time.Hour)
+	auditCache := lru.NewLRU(100_000, func(_ string, _ *DidAuditEntry) {
+		cacheSize.WithLabelValues("audit_log").Dec()
+	}, 1*time.Hour)
 
 	return &PlcClient{
 		client:     client,
@@ -89,7 +93,16 @@ type DidAuditEntry struct {
 type DidAuditLog []DidAuditEntry
 
 func (c *PlcClient) GetDIDDoc(ctx context.Context, did string) (*identity.DIDDocument, error) {
+	status := "error"
+	cached := false
+
+	defer func() {
+		plcRequests.WithLabelValues("did_doc", status, fmt.Sprintf("%t", cached))
+	}()
+
 	if val, ok := c.docCache.Get(did); ok {
+		status = "ok"
+		cached = true
 		return val, nil
 	}
 
@@ -102,7 +115,12 @@ func (c *PlcClient) GetDIDDoc(ctx context.Context, did string) (*identity.DIDDoc
 		return nil, fmt.Errorf("DID Document not found")
 	}
 
-	c.docCache.Add(did, didDoc)
+	if c.docCache != nil {
+		c.docCache.Add(did, didDoc)
+	}
+
+	cacheSize.WithLabelValues("did_doc").Inc()
+	status = "ok"
 
 	return didDoc, nil
 }
@@ -110,7 +128,16 @@ func (c *PlcClient) GetDIDDoc(ctx context.Context, did string) (*identity.DIDDoc
 var ErrAuditLogNotFound = errors.New("audit log not found for DID")
 
 func (c *PlcClient) GetDIDAuditLog(ctx context.Context, did string) (*DidAuditEntry, error) {
+	status := "error"
+	cached := false
+
+	defer func() {
+		plcRequests.WithLabelValues("audit_log", status, fmt.Sprintf("%t", cached))
+	}()
+
 	if val, ok := c.auditCache.Get(did); ok {
+		status = "ok"
+		cached = true
 		return val, nil
 	}
 
@@ -148,6 +175,9 @@ func (c *PlcClient) GetDIDAuditLog(ctx context.Context, did string) (*DidAuditEn
 	if c.auditCache != nil {
 		c.auditCache.Add(did, &entry)
 	}
+
+	cacheSize.WithLabelValues("audit_log").Inc()
+	status = "ok"
 
 	return &entry, nil
 }
