@@ -360,12 +360,17 @@ func (s *Server) handleEvent(ctx context.Context, evt *events.XRPCStreamEvent) e
 			timestamp = evt.RepoIdentity.Time
 			did = evt.RepoIdentity.Did
 
+			var handle string
+			if evt.RepoIdentity.Handle != nil {
+				handle = *evt.RepoIdentity.Handle
+			}
+
 			kafkaEvt = AtKafkaEvent{
 				Did:       evt.RepoIdentity.Did,
 				Timestamp: evt.RepoIdentity.Time,
 				Identity: &AtKafkaIdentity{
 					Seq:    evt.RepoIdentity.Seq,
-					Handle: *evt.RepoIdentity.Handle,
+					Handle: handle,
 				},
 			}
 		} else if evt.RepoInfo != nil {
