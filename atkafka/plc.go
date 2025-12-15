@@ -97,7 +97,7 @@ func (c *PlcClient) GetDIDDoc(ctx context.Context, did string) (*identity.DIDDoc
 	cached := false
 
 	defer func() {
-		plcRequests.WithLabelValues("did_doc", status, fmt.Sprintf("%t", cached))
+		plcRequests.WithLabelValues("did_doc", status, fmt.Sprintf("%t", cached)).Inc()
 	}()
 
 	if val, ok := c.docCache.Get(did); ok {
@@ -132,7 +132,7 @@ func (c *PlcClient) GetDIDAuditLog(ctx context.Context, did string) (*DidAuditEn
 	cached := false
 
 	defer func() {
-		plcRequests.WithLabelValues("audit_log", status, fmt.Sprintf("%t", cached))
+		plcRequests.WithLabelValues("audit_log", status, fmt.Sprintf("%t", cached)).Inc()
 	}()
 
 	if val, ok := c.auditCache.Get(did); ok {
