@@ -216,16 +216,9 @@ func (s *Server) Run(ctx context.Context) error {
 	return nil
 }
 
-type EventMetadata struct {
-	DidDocument  *identity.DIDDocument `json:"didDocument,omitempty"`
-	PdsHost      string                `json:"pdsHost,omitempty"`
-	Handle       string                `json:"handle,omitempty"`
-	DidCreatedAt string                `json:"didCreatedAt,omitempty"`
-	AccountAge   int64                 `json:"accountAge"`
-}
-
-func (s *Server) FetchEventMetadata(ctx context.Context, did string) (*EventMetadata, error) {
-	var didDocument *identity.DIDDocument
+func (s *Server) FetchEventMetadata(ctx context.Context, did string) (*EventMetadata, *identity.Identity, error) {
+	var ident *identity.Identity
+	var didDocument identity.DIDDocument
 	var pdsHost string
 	var handle string
 	var didCreatedAt string
@@ -236,26 +229,16 @@ func (s *Server) FetchEventMetadata(ctx context.Context, did string) (*EventMeta
 	if s.plcClient != nil {
 		wg.Go(func() {
 			logger := s.logger.With("component", "didDoc")
-			doc, err := s.plcClient.GetDIDDoc(ctx, did)
+			var err error
+			ident, err = s.plcClient.GetIdentity(ctx, did)
 			if err != nil {
 				logger.Error("error fetching did doc", "did", did, "err", err)
 				return
 			}
-			didDocument = doc
-
-			for _, svc := range doc.Service {
-				if svc.ID == "#atproto_pds" {
-					pdsHost = svc.ServiceEndpoint
-					break
-				}
-			}
-
-			for _, aka := range doc.AlsoKnownAs {
-				if after, ok := strings.CutPrefix(aka, "at://"); ok {
-					handle = after
-					break
-				}
-			}
+			ident = ident
+			didDocument = ident.DIDDocument()
+			pdsHost = ident.PDSEndpoint()
+			handle = ident.Handle.String()
 		})
 
 		wg.Go(func() {
@@ -286,7 +269,7 @@ func (s *Server) FetchEventMetadata(ctx context.Context, did string) (*EventMeta
 		Handle:       handle,
 		DidCreatedAt: didCreatedAt,
 		AccountAge:   accountAge,
-	}, nil
+	}, ident, nil
 }
 
 func (s *Server) handleEvent(ctx context.Context, evt *events.XRPCStreamEvent) error {
@@ -313,12 +296,42 @@ func (s *Server) handleEvent(ctx context.Context, evt *events.XRPCStreamEvent) e
 			return nil
 		}
 
-		eventMetadata, err := s.FetchEventMetadata(dispatchCtx, evt.RepoCommit.Repo)
+		eventMetadata, ident, err := s.FetchEventMetadata(dispatchCtx, evt.RepoCommit.Repo)
 		if err != nil {
 			logger.Error("error fetching event metadata", "err", err)
-		}
+		} else {
+			skip := false
+			pdsEndpoint := ident.PDSEndpoint()
+			u, err := url.Parse(pdsEndpoint)
+			if err != nil {
+				return fmt.Errorf("failed to parse pds host: %w", err)
+			}
+			pdsHost := u.Hostname()
 
-		// TODO: check event metadata for watch/ignore
+			if pdsHost != "" {
+				if len(s.watchedServices) > 0 {
+					skip = true
+					for _, watchedService := range s.watchedServices {
+						if watchedService == pdsHost || strings.HasPrefix(pdsHost, watchedService) {
+							skip = false
+							break
+						}
+					}
+				} else if len(s.ignoredServices) > 0 {
+					for _, ignoredService := range s.watchedServices {
+						if ignoredService == pdsHost || strings.HasPrefix(pdsHost, ignoredService) {
+							skip = true
+							break
+						}
+					}
+				}
+			}
+
+			if skip {
+				logger.Debug("skipping event based on pds host", "pdsHost", pdsHost)
+				return nil
+			}
+		}
 
 		for _, op := range evt.RepoCommit.Ops {
 			kind := repomgr.EventKind(op.Action)
@@ -326,7 +339,28 @@ func (s *Server) handleEvent(ctx context.Context, evt *events.XRPCStreamEvent) e
 			rkey := strings.Split(op.Path, "/")[1]
 			atUri := fmt.Sprintf("at://%s/%s/%s", evt.RepoCommit.Repo, collection, rkey)
 
-			// TODO: check for ignored/watched collection
+			skip := false
+			if len(s.watchedCollections) > 0 {
+				skip = true
+				for _, watchedCollection := range s.watchedCollections {
+					if watchedCollection == collection || strings.HasPrefix(collection, watchedCollection) {
+						skip = false
+						break
+					}
+				}
+			} else if len(s.ignoredCollections) > 0 {
+				for _, ignoredCollection := range s.ignoredCollections {
+					if ignoredCollection == collection || strings.HasPrefix(collection, ignoredCollection) {
+						skip = true
+						break
+					}
+				}
+			}
+
+			if skip {
+				logger.Debug("skipping event based on collection", "collection", collection)
+				continue
+			}
 
 			kindStr := "create"
 			switch kind {
@@ -470,10 +504,42 @@ func (s *Server) handleEvent(ctx context.Context, evt *events.XRPCStreamEvent) e
 		if did != "" {
 			// key events by DID
 			evtKey = did
-			eventMetadata, err := s.FetchEventMetadata(dispatchCtx, did)
+			eventMetadata, ident, err := s.FetchEventMetadata(dispatchCtx, did)
 			if err != nil {
 				logger.Error("error fetching event metadata", "err", err)
 			} else {
+				skip := false
+				pdsEndpoint := ident.PDSEndpoint()
+				u, err := url.Parse(pdsEndpoint)
+				if err != nil {
+					return fmt.Errorf("failed to parse pds host: %w", err)
+				}
+				pdsHost := u.Hostname()
+
+				if pdsHost != "" {
+					if len(s.watchedServices) > 0 {
+						skip = true
+						for _, watchedService := range s.watchedServices {
+							if watchedService == pdsHost || strings.HasPrefix(pdsHost, watchedService) {
+								skip = false
+								break
+							}
+						}
+					} else if len(s.ignoredServices) > 0 {
+						for _, ignoredService := range s.watchedServices {
+							if ignoredService == pdsHost || strings.HasPrefix(pdsHost, ignoredService) {
+								skip = true
+								break
+							}
+						}
+					}
+				}
+
+				if skip {
+					logger.Debug("skipping event based on pds host", "pdsHost", pdsHost)
+					return nil
+				}
+
 				kafkaEvt.Metadata = eventMetadata
 			}
 		} else {

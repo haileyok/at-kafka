@@ -1,5 +1,7 @@
 package atkafka
 
+import "github.com/bluesky-social/indigo/atproto/identity"
+
 type AtKafkaOp struct {
 	Action     string         `json:"action"`
 	Collection string         `json:"collection"`
@@ -50,4 +52,12 @@ type OspreyEventData struct {
 type OspreyAtKafkaEvent struct {
 	Data     OspreyEventData `json:"data"`
 	SendTime string          `json:"send_time"`
+}
+
+type EventMetadata struct {
+	DidDocument  identity.DIDDocument `json:"didDocument,omitempty"`
+	PdsHost      string               `json:"pdsHost,omitempty"`
+	Handle       string               `json:"handle,omitempty"`
+	DidCreatedAt string               `json:"didCreatedAt,omitempty"`
+	AccountAge   int64                `json:"accountAge"`
 }

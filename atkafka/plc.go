@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"time"
 
@@ -19,10 +18,9 @@ import (
 
 type PlcClient struct {
 	client     *http.Client
-	dir        *identity.BaseDirectory
-	plcHost    string
-	docCache   *lru.LRU[string, *identity.DIDDocument]
+	dir        *identity.CacheDirectory
 	auditCache *lru.LRU[string, *DidAuditEntry]
+	plcHost    string
 }
 
 type PlcClientArgs struct {
@@ -33,26 +31,16 @@ func NewPlcClient(args *PlcClientArgs) *PlcClient {
 	client := robusthttp.NewClient(robusthttp.WithMaxRetries(2))
 	client.Timeout = 3 * time.Second
 
-	baseDir := identity.BaseDirectory{
-		PLCURL:     args.PlcHost,
-		PLCLimiter: rate.NewLimiter(rate.Limit(200), 100),
-		HTTPClient: *client,
-		Resolver: net.Resolver{
-			PreferGo: true,
-			Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
-				dialer := net.Dialer{Timeout: time.Second * 5}
-				nameserver := address
-				return dialer.DialContext(ctx, network, nameserver)
-			},
+	baseDirectory := identity.BaseDirectory{
+		PLCURL: "https://plc.directory",
+		HTTPClient: http.Client{
+			Timeout: time.Second * 5,
 		},
-		TryAuthoritativeDNS: true,
-		// primary Bluesky PDS instance only supports HTTP resolution method
-		SkipDNSDomainSuffixes: []string{".bsky.social"},
+		PLCLimiter:            rate.NewLimiter(rate.Limit(200), 100),
+		TryAuthoritativeDNS:   true,
+		SkipDNSDomainSuffixes: []string{".bsky.social", ".staging.bsky.dev"},
 	}
-
-	docCache := lru.NewLRU(100_000, func(_ string, _ *identity.DIDDocument) {
-		cacheSize.WithLabelValues("did_doc").Dec()
-	}, 5*time.Minute)
+	directory := identity.NewCacheDirectory(&baseDirectory, 100_000, time.Hour*48, time.Minute*15, time.Minute*15)
 
 	auditCache := lru.NewLRU(100_000, func(_ string, _ *DidAuditEntry) {
 		cacheSize.WithLabelValues("audit_log").Dec()
@@ -60,10 +48,9 @@ func NewPlcClient(args *PlcClientArgs) *PlcClient {
 
 	return &PlcClient{
 		client:     client,
-		dir:        &baseDir,
-		plcHost:    args.PlcHost,
-		docCache:   docCache,
+		dir:        &directory,
 		auditCache: auditCache,
+		plcHost:    args.PlcHost,
 	}
 }
 
@@ -92,37 +79,22 @@ type DidAuditEntry struct {
 
 type DidAuditLog []DidAuditEntry
 
-func (c *PlcClient) GetDIDDoc(ctx context.Context, did string) (*identity.DIDDocument, error) {
+func (c *PlcClient) GetIdentity(ctx context.Context, did string) (*identity.Identity, error) {
 	status := "error"
-	cached := false
 
 	defer func() {
-		plcRequests.WithLabelValues("did_doc", status, fmt.Sprintf("%t", cached)).Inc()
+		plcRequests.WithLabelValues("did_doc", status, "unknown").Inc()
 	}()
 
-	if val, ok := c.docCache.Get(did); ok {
-		status = "ok"
-		cached = true
-		return val, nil
-	}
-
-	didDoc, err := c.dir.ResolveDID(ctx, syntax.DID(did))
+	identity, err := c.dir.LookupDID(ctx, syntax.DID(did))
 	if err != nil {
 		return nil, fmt.Errorf("failed to lookup DID: %w", err)
-	}
-
-	if didDoc == nil {
-		return nil, fmt.Errorf("DID Document not found")
-	}
-
-	if c.docCache != nil {
-		c.docCache.Add(did, didDoc)
 	}
 
 	cacheSize.WithLabelValues("did_doc").Inc()
 	status = "ok"
 
-	return didDoc, nil
+	return identity, nil
 }
 
 var ErrAuditLogNotFound = errors.New("audit log not found for DID")
