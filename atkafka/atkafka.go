@@ -298,7 +298,7 @@ func (s *Server) handleEvent(ctx context.Context, evt *events.XRPCStreamEvent) e
 		eventMetadata, ident, err := s.FetchEventMetadata(dispatchCtx, evt.RepoCommit.Repo)
 		if err != nil {
 			logger.Error("error fetching event metadata", "err", err)
-		} else {
+		} else if ident != nil {
 			skip := false
 			pdsEndpoint := ident.PDSEndpoint()
 			u, err := url.Parse(pdsEndpoint)
@@ -506,7 +506,7 @@ func (s *Server) handleEvent(ctx context.Context, evt *events.XRPCStreamEvent) e
 			eventMetadata, ident, err := s.FetchEventMetadata(dispatchCtx, did)
 			if err != nil {
 				logger.Error("error fetching event metadata", "err", err)
-			} else {
+			} else if ident != nil {
 				skip := false
 				pdsEndpoint := ident.PDSEndpoint()
 				u, err := url.Parse(pdsEndpoint)

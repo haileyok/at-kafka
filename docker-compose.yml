@@ -51,6 +51,10 @@ services:
       ATKAFKA_OUTPUT_TOPIC: "atproto-events"
       ATKAFKA_OSPREY_COMPATIBLE: "false"
       ATKAFKA_PLC_HOST: "https://plc.directory"
+
+      ATKAFKA_WATCHED_SERVICES: "*.bsky.network"
+
+      ATKAFKA_IGNORED_COLLECTIONS: "app.bsky.*"
     restart: unless-stopped
 
 volumes:
