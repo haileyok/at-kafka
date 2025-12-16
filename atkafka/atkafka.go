@@ -235,7 +235,6 @@ func (s *Server) FetchEventMetadata(ctx context.Context, did string) (*EventMeta
 				logger.Error("error fetching did doc", "did", did, "err", err)
 				return
 			}
-			ident = ident
 			didDocument = ident.DIDDocument()
 			pdsHost = ident.PDSEndpoint()
 			handle = ident.Handle.String()
@@ -343,14 +342,14 @@ func (s *Server) handleEvent(ctx context.Context, evt *events.XRPCStreamEvent) e
 			if len(s.watchedCollections) > 0 {
 				skip = true
 				for _, watchedCollection := range s.watchedCollections {
-					if watchedCollection == collection || strings.HasPrefix(collection, watchedCollection) {
+					if watchedCollection == collection || strings.HasPrefix(collection, watchedCollection+".") {
 						skip = false
 						break
 					}
 				}
 			} else if len(s.ignoredCollections) > 0 {
 				for _, ignoredCollection := range s.ignoredCollections {
-					if ignoredCollection == collection || strings.HasPrefix(collection, ignoredCollection) {
+					if ignoredCollection == collection || strings.HasPrefix(collection, ignoredCollection+".") {
 						skip = true
 						break
 					}
