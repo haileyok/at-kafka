@@ -49,7 +49,7 @@ func main() {
 			telemetry.StartMetrics(cmd)
 			logger := telemetry.StartLogger(cmd)
 
-			s := atkafka.NewServer(&atkafka.ServerArgs{
+			s, err := atkafka.NewServer(&atkafka.ServerArgs{
 				RelayHost:        cmd.String("relay-host"),
 				BootstrapServers: cmd.StringSlice("bootstrap-servers"),
 				OutputTopic:      cmd.String("output-topic"),
@@ -57,6 +57,9 @@ func main() {
 				PlcHost:          cmd.String("plc-host"),
 				Logger:           logger,
 			})
+			if err != nil {
+				return fmt.Errorf("failed to create new server: %w", err)
+			}
 
 			if err := s.Run(ctx); err != nil {
 				return fmt.Errorf("error running server: %w", err)

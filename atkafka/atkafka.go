@@ -30,25 +30,64 @@ type Server struct {
 	bootstrapServers []string
 	outputTopic      string
 	ospreyCompat     bool
-	logger           *slog.Logger
 
-	producer *Producer
+	watchedServices []string
+	ignoredServices []string
 
+	watchedCollections []string
+	ignoredCollections []string
+
+	producer  *Producer
 	plcClient *PlcClient
+	logger    *slog.Logger
 }
 
 type ServerArgs struct {
-	RelayHost        string
-	PlcHost          string
+	// network params
+	RelayHost string
+	PlcHost   string
+
+	// for watched and ignoed services or collections, only one list may be supplied
+	// for both services and collections, wildcards are acceptable. for example:
+	// app.bsky.* will watch/ignore any collection that falls under the app.bsky namespace.
+	// *.bsky.network will watch/ignore any event that falls under the bsky.network list of PDSes
+
+	// list of services that are events will be emitted for
+	WatchedServices []string
+	// list of services that events are ignored for
+	IgnoredServices []string
+
+	// list of collections that events are emitted for
+	WatchedCollections []string
+	// list of collections that events are ignored for
+	IgnoredCollections []string
+
+	// kafka params
 	BootstrapServers []string
 	OutputTopic      string
-	OspreyCompat     bool
-	Logger           *slog.Logger
+
+	// osprey-specific params
+	OspreyCompat bool
+
+	// other
+	Logger *slog.Logger
 }
 
-func NewServer(args *ServerArgs) *Server {
+func NewServer(args *ServerArgs) (*Server, error) {
 	if args.Logger == nil {
 		args.Logger = slog.Default()
+	}
+
+	if len(args.WatchedServices) > 0 && len(args.IgnoredServices) > 0 {
+		return nil, fmt.Errorf("you may only specify a list of watched services _or_ ignored collections, not both")
+	}
+
+	if len(args.WatchedServices) > 0 || len(args.IgnoredServices) > 0 && args.PlcHost == "" {
+		return nil, fmt.Errorf("unable to support watched/ignored services without specifying a PLC host")
+	}
+
+	if len(args.WatchedCollections) > 0 && len(args.IgnoredCollections) > 0 {
+		return nil, fmt.Errorf("you may only specify a list of watched collections _or_ ignored collections, not both")
 	}
 
 	var plcClient *PlcClient
@@ -58,7 +97,7 @@ func NewServer(args *ServerArgs) *Server {
 		})
 	}
 
-	return &Server{
+	s := &Server{
 		relayHost:        args.RelayHost,
 		plcClient:        plcClient,
 		bootstrapServers: args.BootstrapServers,
@@ -66,6 +105,36 @@ func NewServer(args *ServerArgs) *Server {
 		ospreyCompat:     args.OspreyCompat,
 		logger:           args.Logger,
 	}
+
+	if len(args.WatchedServices) > 0 {
+		watchedServices := make([]string, 0, len(args.WatchedServices))
+		for _, service := range args.WatchedServices {
+			watchedServices = append(watchedServices, strings.TrimPrefix(strings.TrimPrefix(service, "*."), "."))
+		}
+		s.watchedServices = watchedServices
+	} else if len(args.IgnoredCollections) > 0 {
+		ignoredServices := make([]string, 0, len(args.IgnoredServices))
+		for _, service := range args.WatchedServices {
+			ignoredServices = append(ignoredServices, strings.TrimPrefix(strings.TrimPrefix(service, "*."), "."))
+		}
+		s.ignoredServices = ignoredServices
+	}
+
+	if len(args.WatchedCollections) > 0 {
+		watchedCollections := make([]string, 0, len(args.WatchedCollections))
+		for _, collection := range args.WatchedCollections {
+			watchedCollections = append(watchedCollections, strings.TrimSuffix(strings.TrimSuffix(collection, ".*"), "."))
+		}
+		s.watchedCollections = watchedCollections
+	} else if len(args.IgnoredCollections) > 0 {
+		ignoredCollections := make([]string, 0, len(args.IgnoredCollections))
+		for _, collection := range args.WatchedCollections {
+			ignoredCollections = append(ignoredCollections, strings.TrimSuffix(strings.TrimSuffix(collection, ".*"), "."))
+		}
+		s.ignoredCollections = ignoredCollections
+	}
+
+	return s, nil
 }
 
 func (s *Server) Run(ctx context.Context) error {
@@ -182,8 +251,8 @@ func (s *Server) FetchEventMetadata(ctx context.Context, did string) (*EventMeta
 			}
 
 			for _, aka := range doc.AlsoKnownAs {
-				if strings.HasPrefix(aka, "at://") {
-					handle = strings.TrimPrefix(aka, "at://")
+				if after, ok := strings.CutPrefix(aka, "at://"); ok {
+					handle = after
 					break
 				}
 			}
@@ -230,7 +299,13 @@ func (s *Server) handleEvent(ctx context.Context, evt *events.XRPCStreamEvent) e
 	var collection string
 	var actionName string
 
+	var evtKey string
+	var evtsToProduce [][]byte
+
 	if evt.RepoCommit != nil {
+		// key events by DID
+		evtKey = evt.RepoCommit.Repo
+
 		// read the repo
 		rr, err := repo.ReadRepoFromCar(ctx, bytes.NewReader(evt.RepoCommit.Blocks))
 		if err != nil {
@@ -238,11 +313,20 @@ func (s *Server) handleEvent(ctx context.Context, evt *events.XRPCStreamEvent) e
 			return nil
 		}
 
+		eventMetadata, err := s.FetchEventMetadata(dispatchCtx, evt.RepoCommit.Repo)
+		if err != nil {
+			logger.Error("error fetching event metadata", "err", err)
+		}
+
+		// TODO: check event metadata for watch/ignore
+
 		for _, op := range evt.RepoCommit.Ops {
 			kind := repomgr.EventKind(op.Action)
 			collection = strings.Split(op.Path, "/")[0]
 			rkey := strings.Split(op.Path, "/")[1]
 			atUri := fmt.Sprintf("at://%s/%s/%s", evt.RepoCommit.Repo, collection, rkey)
+
+			// TODO: check for ignored/watched collection
 
 			kindStr := "create"
 			switch kind {
@@ -298,14 +382,11 @@ func (s *Server) handleEvent(ctx context.Context, evt *events.XRPCStreamEvent) e
 				Operation: &atkOp,
 			}
 
-			eventMetadata, err := s.FetchEventMetadata(dispatchCtx, evt.RepoCommit.Repo)
-			if err != nil {
-				logger.Error("error fetching event metadata", "err", err)
-			} else {
+			if eventMetadata != nil {
 				kafkaEvt.Metadata = eventMetadata
 			}
 
-			var kafkaEvtBytes []byte
+			var evtBytes []byte
 			if s.ospreyCompat {
 				// create the wrapper event for osprey
 				ospreyKafkaEvent := OspreyAtKafkaEvent{
@@ -320,17 +401,15 @@ func (s *Server) handleEvent(ctx context.Context, evt *events.XRPCStreamEvent) e
 					SendTime: time.Now().Format(time.RFC3339),
 				}
 
-				kafkaEvtBytes, err = json.Marshal(&ospreyKafkaEvent)
+				evtBytes, err = json.Marshal(&ospreyKafkaEvent)
 			} else {
-				kafkaEvtBytes, err = json.Marshal(&kafkaEvt)
+				evtBytes, err = json.Marshal(&kafkaEvt)
 			}
 			if err != nil {
 				return fmt.Errorf("failed to marshal kafka event: %w", err)
 			}
 
-			if err := s.produceAsync(ctx, evt.RepoCommit.Repo, kafkaEvtBytes); err != nil {
-				return err
-			}
+			evtsToProduce = append(evtsToProduce, evtBytes)
 		}
 	} else {
 		defer func() {
@@ -389,16 +468,21 @@ func (s *Server) handleEvent(ctx context.Context, evt *events.XRPCStreamEvent) e
 		}
 
 		if did != "" {
+			// key events by DID
+			evtKey = did
 			eventMetadata, err := s.FetchEventMetadata(dispatchCtx, did)
 			if err != nil {
 				logger.Error("error fetching event metadata", "err", err)
 			} else {
 				kafkaEvt.Metadata = eventMetadata
 			}
+		} else {
+			// key events without a DID by "unknown"
+			evtKey = "<unknown>"
 		}
 
 		// create the kafka event bytes
-		var kafkaEvtBytes []byte
+		var evtBytes []byte
 		var err error
 
 		if s.ospreyCompat {
@@ -415,15 +499,19 @@ func (s *Server) handleEvent(ctx context.Context, evt *events.XRPCStreamEvent) e
 				SendTime: time.Now().Format(time.RFC3339),
 			}
 
-			kafkaEvtBytes, err = json.Marshal(&ospreyKafkaEvent)
+			evtBytes, err = json.Marshal(&ospreyKafkaEvent)
 		} else {
-			kafkaEvtBytes, err = json.Marshal(&kafkaEvt)
+			evtBytes, err = json.Marshal(&kafkaEvt)
 		}
 		if err != nil {
 			return fmt.Errorf("failed to marshal kafka event: %w", err)
 		}
 
-		if err := s.produceAsync(ctx, did, kafkaEvtBytes); err != nil {
+		evtsToProduce = append(evtsToProduce, evtBytes)
+	}
+
+	for _, evtBytes := range evtsToProduce {
+		if err := s.produceAsync(ctx, evtKey, evtBytes); err != nil {
 			return err
 		}
 	}
@@ -441,67 +529,9 @@ func (s *Server) produceAsync(ctx context.Context, key string, msg []byte) error
 		producedEvents.WithLabelValues(status).Inc()
 	}
 
-	if !s.ospreyCompat {
-		if err := s.producer.ProduceAsync(ctx, key, msg, callback); err != nil {
-			return fmt.Errorf("failed to produce message: %w", err)
-		}
-	} else if s.ospreyCompat {
-		if err := s.producer.ProduceAsync(ctx, key, msg, callback); err != nil {
-			return fmt.Errorf("failed to produce message: %w", err)
-		}
+	if err := s.producer.ProduceAsync(ctx, key, msg, callback); err != nil {
+		return fmt.Errorf("failed to produce message: %w", err)
 	}
 
 	return nil
-}
-
-type AtKafkaOp struct {
-	Action     string         `json:"action"`
-	Collection string         `json:"collection"`
-	Rkey       string         `json:"rkey"`
-	Uri        string         `json:"uri"`
-	Cid        string         `json:"cid"`
-	Path       string         `json:"path"`
-	Record     map[string]any `json:"record"`
-}
-
-type AtKafkaIdentity struct {
-	Seq    int64  `json:"seq"`
-	Handle string `json:"handle"`
-}
-
-type AtKafkaInfo struct {
-	Name    string  `json:"name"`
-	Message *string `json:"message,omitempty"`
-}
-
-type AtKafkaAccount struct {
-	Active bool    `json:"active"`
-	Seq    int64   `json:"seq"`
-	Status *string `json:"status,omitempty"`
-}
-
-type AtKafkaEvent struct {
-	Did       string         `json:"did"`
-	Timestamp string         `json:"timestamp"`
-	Metadata  *EventMetadata `json:"eventMetadata"`
-
-	Operation *AtKafkaOp       `json:"operation,omitempty"`
-	Account   *AtKafkaAccount  `json:"account,omitempty"`
-	Identity  *AtKafkaIdentity `json:"identity,omitempty"`
-	Info      *AtKafkaInfo     `json:"info,omitempty"`
-}
-
-// Intentionally using snake case since that is what Osprey expects
-type OspreyEventData struct {
-	ActionName string            `json:"action_name"`
-	ActionId   int64             `json:"action_id"`
-	Data       AtKafkaEvent      `json:"data"`
-	Timestamp  string            `json:"timestamp"`
-	SecretData map[string]string `json:"secret_data"`
-	Encoding   string            `json:"encoding"`
-}
-
-type OspreyAtKafkaEvent struct {
-	Data     OspreyEventData `json:"data"`
-	SendTime string          `json:"send_time"`
 }
