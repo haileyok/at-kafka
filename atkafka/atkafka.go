@@ -79,10 +79,10 @@ func NewServer(args *ServerArgs) (*Server, error) {
 	}
 
 	if len(args.WatchedServices) > 0 && len(args.IgnoredServices) > 0 {
-		return nil, fmt.Errorf("you may only specify a list of watched services _or_ ignored collections, not both")
+		return nil, fmt.Errorf("you may only specify a list of watched services _or_ ignored services, not both")
 	}
 
-	if len(args.WatchedServices) > 0 || len(args.IgnoredServices) > 0 && args.PlcHost == "" {
+	if (len(args.WatchedServices) > 0 || len(args.IgnoredServices) > 0) && args.PlcHost == "" {
 		return nil, fmt.Errorf("unable to support watched/ignored services without specifying a PLC host")
 	}
 
@@ -112,9 +112,9 @@ func NewServer(args *ServerArgs) (*Server, error) {
 			watchedServices = append(watchedServices, strings.TrimPrefix(strings.TrimPrefix(service, "*."), "."))
 		}
 		s.watchedServices = watchedServices
-	} else if len(args.IgnoredCollections) > 0 {
+	} else if len(args.IgnoredServices) > 0 {
 		ignoredServices := make([]string, 0, len(args.IgnoredServices))
-		for _, service := range args.WatchedServices {
+		for _, service := range args.IgnoredServices {
 			ignoredServices = append(ignoredServices, strings.TrimPrefix(strings.TrimPrefix(service, "*."), "."))
 		}
 		s.ignoredServices = ignoredServices
@@ -128,7 +128,7 @@ func NewServer(args *ServerArgs) (*Server, error) {
 		s.watchedCollections = watchedCollections
 	} else if len(args.IgnoredCollections) > 0 {
 		ignoredCollections := make([]string, 0, len(args.IgnoredCollections))
-		for _, collection := range args.WatchedCollections {
+		for _, collection := range args.IgnoredCollections {
 			ignoredCollections = append(ignoredCollections, strings.TrimSuffix(strings.TrimSuffix(collection, ".*"), "."))
 		}
 		s.ignoredCollections = ignoredCollections
@@ -312,14 +312,14 @@ func (s *Server) handleEvent(ctx context.Context, evt *events.XRPCStreamEvent) e
 				if len(s.watchedServices) > 0 {
 					skip = true
 					for _, watchedService := range s.watchedServices {
-						if watchedService == pdsHost || strings.HasPrefix(pdsHost, watchedService) {
+						if watchedService == pdsHost || strings.HasSuffix(pdsHost, "."+watchedService) {
 							skip = false
 							break
 						}
 					}
 				} else if len(s.ignoredServices) > 0 {
-					for _, ignoredService := range s.watchedServices {
-						if ignoredService == pdsHost || strings.HasPrefix(pdsHost, ignoredService) {
+					for _, ignoredService := range s.ignoredServices {
+						if ignoredService == pdsHost || strings.HasSuffix(pdsHost, "."+ignoredService) {
 							skip = true
 							break
 						}
@@ -520,14 +520,14 @@ func (s *Server) handleEvent(ctx context.Context, evt *events.XRPCStreamEvent) e
 					if len(s.watchedServices) > 0 {
 						skip = true
 						for _, watchedService := range s.watchedServices {
-							if watchedService == pdsHost || strings.HasPrefix(pdsHost, watchedService) {
+							if watchedService == pdsHost || strings.HasSuffix(pdsHost, "."+watchedService) {
 								skip = false
 								break
 							}
 						}
 					} else if len(s.ignoredServices) > 0 {
-						for _, ignoredService := range s.watchedServices {
-							if ignoredService == pdsHost || strings.HasPrefix(pdsHost, ignoredService) {
+						for _, ignoredService := range s.ignoredServices {
+							if ignoredService == pdsHost || strings.HasSuffix(pdsHost, "."+ignoredService) {
 								skip = true
 								break
 							}
