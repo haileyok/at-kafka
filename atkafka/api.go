@@ -8,12 +8,14 @@ import (
 	"github.com/bluesky-social/indigo/api/bsky"
 	"github.com/bluesky-social/indigo/xrpc"
 	lru "github.com/hashicorp/golang-lru/v2/expirable"
+	"golang.org/x/time/rate"
 )
 
 type ApiClient struct {
 	xrpcClient *xrpc.Client
 
-	profileCache *lru.LRU[string, *bsky.ActorDefs_ProfileViewDetailed]
+	profileCache   *lru.LRU[string, *bsky.ActorDefs_ProfileViewDetailed]
+	profileLimiter *rate.Limiter
 }
 
 type ApiClientArgs struct {
@@ -30,6 +32,7 @@ func NewApiClient(args *ApiClientArgs) (*ApiClient, error) {
 		profileCache: lru.NewLRU(100_000, func(key string, value *bsky.ActorDefs_ProfileViewDetailed) {
 			cacheSize.WithLabelValues("profile").Dec()
 		}, 10*time.Minute),
+		profileLimiter: rate.NewLimiter(rate.Limit(200), 100),
 	}
 
 	return &pc, nil
@@ -40,12 +43,17 @@ func (pc *ApiClient) GetProfile(ctx context.Context, did string) (*bsky.ActorDef
 	cached, ok := pc.profileCache.Get(did)
 
 	defer func() {
-		apiRequests.WithLabelValues("profile", status, fmt.Sprintf("%t", ok))
+		apiRequests.WithLabelValues("profile", status, fmt.Sprintf("%t", ok)).Inc()
 	}()
 
 	if ok {
 		status = "ok"
 		return cached, nil
+	}
+
+	if err := pc.profileLimiter.Wait(ctx); err != nil {
+		status = "limited"
+		return nil, fmt.Errorf("failed to get limit: %w", err)
 	}
 
 	resp, err := bsky.ActorGetProfile(ctx, pc.xrpcClient, did)
