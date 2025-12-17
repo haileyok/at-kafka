@@ -25,4 +25,9 @@ var (
 		Namespace: "atkafka",
 		Name:      "cache_size",
 	}, []string{"kind"})
+
+	apiRequests = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "atkafka",
+		Name:      "api_requests",
+	}, []string{"kind", "status", "cached"})
 )

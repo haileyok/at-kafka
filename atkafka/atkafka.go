@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/bluesky-social/indigo/api/bsky"
 	"github.com/bluesky-social/indigo/atproto/atdata"
 	"github.com/bluesky-social/indigo/atproto/identity"
 	"github.com/bluesky-social/indigo/events"
@@ -39,6 +40,7 @@ type Server struct {
 
 	producer  *Producer
 	plcClient *PlcClient
+	apiClient *ApiClient
 	logger    *slog.Logger
 }
 
@@ -46,6 +48,7 @@ type ServerArgs struct {
 	// network params
 	RelayHost string
 	PlcHost   string
+	ApiHost   string
 
 	// for watched and ignoed services or collections, only one list may be supplied
 	// for both services and collections, wildcards are acceptable. for example:
@@ -97,9 +100,21 @@ func NewServer(args *ServerArgs) (*Server, error) {
 		})
 	}
 
+	var apiClient *ApiClient
+	if args.ApiHost != "" {
+		var err error
+		apiClient, err = NewApiClient(&ApiClientArgs{
+			ApiHost: args.ApiHost,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to create new api client: %w", err)
+		}
+	}
+
 	s := &Server{
 		relayHost:        args.RelayHost,
 		plcClient:        plcClient,
+		apiClient:        apiClient,
 		bootstrapServers: args.BootstrapServers,
 		outputTopic:      args.OutputTopic,
 		ospreyCompat:     args.OspreyCompat,
@@ -223,6 +238,7 @@ func (s *Server) FetchEventMetadata(ctx context.Context, did string) (*EventMeta
 	var handle string
 	var didCreatedAt string
 	accountAge := int64(-1)
+	var profile *bsky.ActorDefs_ProfileViewDetailed
 
 	var wg sync.WaitGroup
 
@@ -260,6 +276,18 @@ func (s *Server) FetchEventMetadata(ctx context.Context, did string) (*EventMeta
 		})
 	}
 
+	if s.apiClient != nil {
+		wg.Go(func() {
+			logger := s.logger.With("component", "profile")
+			var err error
+			profile, err = s.apiClient.GetProfile(ctx, did)
+			if err != nil {
+				logger.Error("error getting actor profile", "did", did)
+				return
+			}
+		})
+	}
+
 	wg.Wait()
 
 	return &EventMetadata{
@@ -268,6 +296,7 @@ func (s *Server) FetchEventMetadata(ctx context.Context, did string) (*EventMeta
 		Handle:       handle,
 		DidCreatedAt: didCreatedAt,
 		AccountAge:   accountAge,
+		Profile:      profile,
 	}, ident, nil
 }
 
@@ -336,7 +365,16 @@ func (s *Server) handleEvent(ctx context.Context, evt *events.XRPCStreamEvent) e
 			kind := repomgr.EventKind(op.Action)
 			collection = strings.Split(op.Path, "/")[0]
 			rkey := strings.Split(op.Path, "/")[1]
-			atUri := fmt.Sprintf("at://%s/%s/%s", evt.RepoCommit.Repo, collection, rkey)
+			did := evt.RepoCommit.Repo
+			atUri := fmt.Sprintf("at://%s/%s/%s", did, collection, rkey)
+
+			// bust the profile cache whenever it gets updated
+			// we won't worry about the counts of i.e. followers, since we have carveouts for some of these already anyway
+			if collection == "app.bsky.actor.profile" {
+				if s.apiClient != nil {
+					s.apiClient.BustProfileCache(did)
+				}
+			}
 
 			skip := false
 			if len(s.watchedCollections) > 0 {
@@ -410,7 +448,7 @@ func (s *Server) handleEvent(ctx context.Context, evt *events.XRPCStreamEvent) e
 
 			// create the evt to put on kafka, regardless of if we are using osprey or not
 			kafkaEvt := AtKafkaEvent{
-				Did:       evt.RepoCommit.Repo,
+				Did:       did,
 				Timestamp: evt.RepoCommit.Time,
 				Operation: &atkOp,
 			}

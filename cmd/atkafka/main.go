@@ -24,6 +24,17 @@ func main() {
 				Value:   "wss://bsky.network",
 				EnvVars: []string{"ATKAFKA_RELAY_HOST"},
 			},
+			&cli.StringFlag{
+				Name:    "plc-host",
+				Usage:   "The host of the PLC directory you want to use for event metadata",
+				EnvVars: []string{"ATKAFKA_PLC_HOST"},
+			},
+			&cli.StringFlag{
+				Name:    "api-host",
+				Usage:   "The API host for making XRPC calls",
+				EnvVars: []string{"ATKAFKA_API_HOST"},
+				Value:   "https://public.api.bsky.app",
+			},
 			&cli.StringSliceFlag{
 				Name:     "bootstrap-servers",
 				Usage:    "List of Kafka bootstrap servers",
@@ -41,11 +52,6 @@ func main() {
 				Usage:   "Whether or not events should be formulated in an Osprey-compatible format",
 				EnvVars: []string{"ATKAFKA_OSPREY_COMPATIBLE"},
 				Value:   false,
-			},
-			&cli.StringFlag{
-				Name:    "plc-host",
-				Usage:   "The host of the PLC directory you want to use for event metadata",
-				EnvVars: []string{"ATKAFKA_PLC_HOST"},
 			},
 			&cli.StringSliceFlag{
 				Name:    "watched-services",
@@ -76,10 +82,11 @@ func main() {
 
 			s, err := atkafka.NewServer(&atkafka.ServerArgs{
 				RelayHost:          cmd.String("relay-host"),
+				PlcHost:            cmd.String("plc-host"),
+				ApiHost:            cmd.String("api-host"),
 				BootstrapServers:   cmd.StringSlice("bootstrap-servers"),
 				OutputTopic:        cmd.String("output-topic"),
 				OspreyCompat:       cmd.Bool("osprey-compatible"),
-				PlcHost:            cmd.String("plc-host"),
 				WatchedServices:    cmd.StringSlice("watched-services"),
 				IgnoredServices:    cmd.StringSlice("ignored-services"),
 				WatchedCollections: cmd.StringSlice("watched-collections"),
