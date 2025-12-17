@@ -282,7 +282,7 @@ func (s *Server) FetchEventMetadata(ctx context.Context, did string) (*EventMeta
 			var err error
 			profile, err = s.apiClient.GetProfile(ctx, did)
 			if err != nil {
-				logger.Error("error getting actor profile", "did", did)
+				logger.Error("error getting actor profile", "did", did, "err", err)
 				return
 			}
 		})
