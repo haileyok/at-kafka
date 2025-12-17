@@ -91,7 +91,6 @@ func (c *PlcClient) GetIdentity(ctx context.Context, did string) (*identity.Iden
 		return nil, fmt.Errorf("failed to lookup DID: %w", err)
 	}
 
-	cacheSize.WithLabelValues("did_doc").Inc()
 	status = "ok"
 
 	return identity, nil
