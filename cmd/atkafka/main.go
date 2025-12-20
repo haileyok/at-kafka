@@ -31,9 +31,8 @@ func main() {
 			},
 			&cli.StringFlag{
 				Name:    "api-host",
-				Usage:   "The API host for making XRPC calls",
+				Usage:   "The API host for making XRPC calls. Recommended to use https://public.api.bsky.app",
 				EnvVars: []string{"ATKAFKA_API_HOST"},
-				Value:   "https://public.api.bsky.app",
 			},
 			&cli.StringSliceFlag{
 				Name:     "bootstrap-servers",
