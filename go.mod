@@ -3,6 +3,7 @@ module github.com/haileyok/at-kafka
 go 1.25.4
 
 require (
+	github.com/araddon/dateparse v0.0.0-20210429162001-6b43995a97de
 	github.com/bluesky-social/go-util v0.0.0-20251012040650-2ebbf57f5934
 	github.com/bluesky-social/indigo v0.0.0-20251125184450-35c1e15d2e5f
 	github.com/gorilla/websocket v1.5.3
@@ -11,6 +12,7 @@ require (
 	github.com/prometheus/client_golang v1.23.2
 	github.com/twmb/franz-go v1.19.5
 	github.com/urfave/cli/v2 v2.25.7
+	golang.org/x/sync v0.16.0
 	golang.org/x/time v0.6.0
 )
 
@@ -95,7 +97,6 @@ require (
 	go.yaml.in/yaml/v2 v2.4.2 // indirect
 	golang.org/x/crypto v0.40.0 // indirect
 	golang.org/x/exp v0.0.0-20240112132812-db7319d0e0e3 // indirect
-	golang.org/x/sync v0.16.0 // indirect
 	golang.org/x/sys v0.35.0 // indirect
 	golang.org/x/text v0.28.0 // indirect
 	golang.org/x/xerrors v0.0.0-20231012003039-104605ab7028 // indirect

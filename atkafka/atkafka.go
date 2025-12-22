@@ -28,6 +28,7 @@ import (
 
 type Server struct {
 	relayHost        string
+	tapHost          string
 	bootstrapServers []string
 	outputTopic      string
 	ospreyCompat     bool
@@ -47,6 +48,7 @@ type Server struct {
 type ServerArgs struct {
 	// network params
 	RelayHost string
+	TapHost   string
 	PlcHost   string
 	ApiHost   string
 
@@ -113,6 +115,7 @@ func NewServer(args *ServerArgs) (*Server, error) {
 
 	s := &Server{
 		relayHost:        args.RelayHost,
+		tapHost:          args.TapHost,
 		plcClient:        plcClient,
 		apiClient:        apiClient,
 		bootstrapServers: args.BootstrapServers,

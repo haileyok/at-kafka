@@ -65,3 +65,28 @@ type EventMetadata struct {
 	AccountAge   int64                               `json:"accountAge"`
 	Profile      *bsky.ActorDefs_ProfileViewDetailed `json:"profile"`
 }
+
+type TapEvent struct {
+	Id       int64             `json:"id"`
+	Type     string            `json:"type"`
+	Record   *TapEventRecord   `json:"record,omitempty"`
+	Identity *TapEventIdentity `json:"identity,omitempty"`
+}
+
+type TapEventRecord struct {
+	Live       bool            `json:"live"`
+	Rev        string          `json:"rev"`
+	Did        string          `json:"did"`
+	Collection string          `json:"collection"`
+	Rkey       string          `json:"rkey"`
+	Action     string          `json:"action"`
+	Cid        string          `json:"cid"`
+	Record     *map[string]any `json:"record,omitempty"`
+}
+
+type TapEventIdentity struct {
+	Did      string `json:"did"`
+	Handle   string `json:"handle"`
+	IsActive bool   `json:"isActive"`
+	Status   string `json:"status"`
+}
