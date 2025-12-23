@@ -36,6 +36,23 @@ services:
     volumes:
       - kafka-data:/var/lib/kafka/data
 
+
+  tap:
+    image: ghcr.io/bluesky-social/indigo/tap:latest
+    hostname: tap
+    container_name: tap
+    depends_on:
+      - kafka
+    ports:
+      - "2480:2480"
+    environment:
+      TAP_BIND: ":2480"
+      TAP_FULL_NETWORK: true
+      TAP_DISABLE_ACKS: false
+      TAP_COLLECTION_FILTERS: "app.bsky.graph.follow"
+    volumes:
+      - tap-data:/data
+
   atkafka:
     build:
       context: .
@@ -43,21 +60,21 @@ services:
     container_name: atkafka
     depends_on:
       - kafka
+      - tap
     ports:
-      - "2112:2112"
+      # metrics port
+      - "6009:6009"
+    command: ["tap-mode"]
     environment:
-      ATKAFKA_RELAY_HOST: "wss://bsky.network"
+      ATKAFKA_TAP_HOST: "ws://tap:2480"
+      ATKAFKA_DISABLE_ACKS: false
       ATKAFKA_BOOTSTRAP_SERVERS: "kafka:29092"
-      ATKAFKA_OUTPUT_TOPIC: "atproto-events"
-      ATKAFKA_OSPREY_COMPATIBLE: "false"
-      ATKAFKA_PLC_HOST: "https://plc.directory"
+      ATKAFKA_OUTPUT_TOPIC: "tap-events"
 
-      ATKAFKA_WATCHED_SERVICES: "*.bsky.network"
-
-      ATKAFKA_IGNORED_COLLECTIONS: "app.bsky.*"
     restart: unless-stopped
 
 volumes:
   zookeeper-data:
   zookeeper-logs:
   kafka-data:
+  tap-data:

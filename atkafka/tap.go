@@ -200,20 +200,27 @@ func (s *Server) produceAsyncTap(ctx context.Context, key string, msg []byte, id
 	logger := s.logger.With("name", "produceAsyncTap", "key", key, "id", id)
 	callback := func(r *kgo.Record, err error) {
 		status := "ok"
+		ackStatus := "ok"
+
+		go func() {
+			producedEvents.WithLabelValues(status).Inc()
+			if s.ws != nil && !s.disableAcks {
+				acksSent.WithLabelValues(ackStatus).Inc()
+			}
+		}()
+
 		if err != nil {
-			status = "error"
 			logger.Error("error producing message", "err", err)
-		} else if s.ws != nil {
+			status = "error"
+		} else if s.ws != nil && !s.disableAcks {
 			if err := s.ws.WriteJSON(TapAck{
 				Type: "ack",
 				Id:   id,
 			}); err != nil {
 				logger.Error("error sending ack", "err", err)
-				status = "ack_error"
+				ackStatus = "error"
 			}
 		}
-
-		producedEvents.WithLabelValues(status).Inc()
 	}
 
 	if err := s.producer.ProduceAsync(ctx, key, msg, callback); err != nil {

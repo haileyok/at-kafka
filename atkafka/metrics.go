@@ -30,4 +30,9 @@ var (
 		Namespace: "atkafka",
 		Name:      "api_requests",
 	}, []string{"kind", "status", "cached"})
+
+	acksSent = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "atkafka",
+		Name:      "acks_sent",
+	}, []string{"status"})
 )
