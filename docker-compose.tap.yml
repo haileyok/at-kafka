@@ -63,7 +63,7 @@ services:
       - tap
     ports:
       # metrics port
-      - "6009:6009"
+      - "6010:6009"
     command: ["tap-mode"]
     environment:
       ATKAFKA_TAP_HOST: "ws://tap:2480"

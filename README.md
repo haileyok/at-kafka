@@ -3,6 +3,8 @@
 A small service that receives events from the AT firehose and produces them to Kafka. Supports standard JSON outputs as well as [Osprey](https://github.com/roostorg/osprey)
 formatted events.
 
+Additionally, at-kafka supports subscribing to [Tap](https://github.com/bluesky-social/indigo/tree/main/cmd/tap) if youare attempting to perform a network backfill.
+
 ## Usage
 
 ### Docker Compose
@@ -11,49 +13,39 @@ The included `docker-compose.yml` provides a complete local stack. Edit the envi
 
 ```yaml
 environment:
-  ATKAFKA_RELAY_HOST: "wss://bsky.network"
-  ATKAFKA_BOOTSTRAP_SERVERS: "kafka:29092"
-  ATKAFKA_OUTPUT_TOPIC: "atproto-events"
-  ATKAFKA_OSPREY_COMPATIBLE: "false"
+  # For relay mode
+  ATKAFKA_RELAY_HOST: "wss://bsky.network" # ATProto relay to subscribe to for events
+
+  # For tap mode
+  ATKAFKA_TAP_HOST: "ws://localhost:2480" # Tap websocket host to subscribe to for events
+  ATKAFKA_DISABLE_ACKS: false # Whether to disable sending of acks to Tap
+
+  # Kafka configuration
+  ATKAFKA_BOOTSTRAP_SERVERS: "kafka:29092" # Kafka bootstrap servers, comma separated
+  ATKAFKA_OUTPUT_TOPIC: "atproto-events" # The output topic for events
+  ATKAFKA_OSPREY_COMPATIBLE: false # Whether to produce Osprey-compatible events
+
+  # Match only Blacksky PDS users
+  ATKAFKA_MATCHED_SERVICES: "blacksky.app" # A comma-separated list of PDSes to emit events for
+  # OR ignore anyone on Bluesky PBC PDSes
+  ATKAFKA_IGNORED_SERVICES: "*.bsky.network" # OR a comma-separated list of PDSes to _not_ emit events for
+
+  # Match only Teal.fm records
+  ATKAFKA_MATCHED_COLLECTIONS: "fm.teal.*" # A comma-separated list of collections to emit events for
+  # OR ignore all Bluesky records
+  ATKAFKA_IGNORED_COLLECTIONS: "app.bsky.*" # OR a comma-separated list of collections to ignore events for
 ```
 
 Then start:
 
 ```bash
-docker compose up -d        # Start services
+# For normal mode
+docker compose up -d
+
+# For tap mode
+docker compose -f docker-compose.tap.yml up -d
+
 ```
-
-### Docker Run
-
-For standard mode:
-
-```bash
-docker run -d \
-  -e ATKAFKA_BOOTSTRAP_SERVERS=kafka:9092 \
-  -e ATKAFKA_OUTPUT_TOPIC=atproto-events \
-  -p 2112:2112 \
-  ghcr.io/haileyok/at-kafka:latest
-```
-
-For Osprey-compatible mode:
-
-```bash
-docker run -d \
-  -e ATKAFKA_BOOTSTRAP_SERVERS=kafka:9092 \
-  -e ATKAFKA_OUTPUT_TOPIC=atproto-events \
-  -e ATKAFKA_OSPREY_COMPATIBLE=true \
-  -p 2112:2112 \
-  ghcr.io/haileyok/at-kafka:latest
-```
-
-## Configuration
-
-| Flag | Environment Variable | Default | Description |
-|------|---------------------|---------|-------------|
-| `--relay-host` | `ATKAFKA_RELAY_HOST` | `wss://bsky.network` | AT Protocol relay host to connect to |
-| `--bootstrap-servers` | `ATKAFKA_BOOTSTRAP_SERVERS` | (required) | Comma-separated list of Kafka bootstrap servers |
-| `--output-topic` | `ATKAFKA_OUTPUT_TOPIC` | (required) | Kafka topic to publish events to |
-| `--osprey-compatible` | `ATKAFKA_OSPREY_COMPATIBLE` | `false` | Enable Osprey-compatible event format |
 
 ## Event Structure
 
@@ -143,3 +135,7 @@ The service exposes Prometheus metrics on the default metrics port.
 
 - `atkafka_handled_events` - Total events that are received on the firehose and handled
 - `atkafka_produced_events` - Total messages that are output on the bus
+- `atkafka_plc_requests` - Total number of PLC requests that were made, if applicable, and whether they were cached
+- `atkafka_api_requests` - Total number of API requests that were made, if applicable, and whether they were cached
+- `atkafka_cache_size` - The size of the PLC and API caches
+- `atkafka_acks_sent` - Total acks that were sent to Tap, if applicable
