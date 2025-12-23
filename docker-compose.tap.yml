@@ -45,11 +45,13 @@ services:
       - kafka
     ports:
       - "2480:2480"
+      - "6010:6010"
     environment:
       TAP_BIND: ":2480"
       TAP_FULL_NETWORK: true
       TAP_DISABLE_ACKS: false
       TAP_COLLECTION_FILTERS: "app.bsky.graph.follow"
+      TAP_METRICS_LISTEN: ":6010"
     volumes:
       - tap-data:/data
 
@@ -63,7 +65,7 @@ services:
       - tap
     ports:
       # metrics port
-      - "6010:6009"
+      - "6009:6009"
     command: ["tap-mode"]
     environment:
       ATKAFKA_TAP_HOST: "ws://tap:2480"
