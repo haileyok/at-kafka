@@ -102,6 +102,50 @@ func main() {
 
 			return nil
 		},
+		Commands: cli.Commands{
+			&cli.Command{
+				Name: "tap-mode",
+				Flags: []cli.Flag{
+					&cli.StringFlag{
+						Name:    "tap-host",
+						Usage:   "Tap host to subscribe to for events",
+						Value:   "ws://localhost:2480",
+						EnvVars: []string{"ATKAFKA_TAP_HOST"},
+					},
+					&cli.BoolFlag{
+						Name:    "disable-acks",
+						Usage:   "Set to `true` to disable sending of event acks to Tap. May result in the loss of events.",
+						EnvVars: []string{"ATKAFKA_DISABLE_ACKS"},
+					},
+				},
+				Action: func(cmd *cli.Context) error {
+
+					ctx := context.Background()
+
+					telemetry.StartMetrics(cmd)
+					logger := telemetry.StartLogger(cmd)
+
+					s, err := atkafka.NewServer(&atkafka.ServerArgs{
+						TapHost:            cmd.String("tap-host"),
+						DisableAcks:        cmd.Bool("disable-acks"),
+						BootstrapServers:   cmd.StringSlice("bootstrap-servers"),
+						OutputTopic:        cmd.String("output-topic"),
+						WatchedCollections: cmd.StringSlice("watched-collections"),
+						IgnoredCollections: cmd.StringSlice("ignored-collections"),
+						Logger:             logger,
+					})
+					if err != nil {
+						return fmt.Errorf("failed to create new server: %w", err)
+					}
+
+					if err := s.RunTapMode(ctx); err != nil {
+						return fmt.Errorf("error running server: %w", err)
+					}
+
+					return nil
+				},
+			},
+		},
 	}
 
 	if err := app.Run(os.Args); err != nil {

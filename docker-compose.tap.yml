@@ -1,0 +1,80 @@
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.0
+    hostname: zookeeper
+    container_name: zookeeper
+    ports:
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    volumes:
+      - zookeeper-data:/var/lib/zookeeper/data
+      - zookeeper-logs:/var/lib/zookeeper/log
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    hostname: kafka
+    container_name: kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+      - "9101:9101"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_JMX_PORT: 9101
+      KAFKA_JMX_HOSTNAME: localhost
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+
+
+  tap:
+    image: ghcr.io/bluesky-social/indigo/tap:latest
+    hostname: tap
+    container_name: tap
+    depends_on:
+      - kafka
+    ports:
+      - "2480:2480"
+    environment:
+      TAP_BIND: ":2480"
+      TAP_FULL_NETWORK: true
+      TAP_DISABLE_ACKS: false
+      TAP_COLLECTION_FILTERS: "app.bsky.graph.follow"
+    volumes:
+      - tap-data:/data
+
+  atkafka:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: atkafka
+    depends_on:
+      - kafka
+      - tap
+    ports:
+      # metrics port
+      - "6010:6009"
+    command: ["tap-mode"]
+    environment:
+      ATKAFKA_TAP_HOST: "ws://tap:2480"
+      ATKAFKA_DISABLE_ACKS: false
+      ATKAFKA_BOOTSTRAP_SERVERS: "kafka:29092"
+      ATKAFKA_OUTPUT_TOPIC: "tap-events"
+
+    restart: unless-stopped
+
+volumes:
+  zookeeper-data:
+  zookeeper-logs:
+  kafka-data:
+  tap-data:
