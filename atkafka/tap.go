@@ -15,6 +15,7 @@ import (
 	"github.com/araddon/dateparse"
 	"github.com/bluesky-social/indigo/atproto/syntax"
 	"github.com/gorilla/websocket"
+	"github.com/twmb/franz-go/pkg/kgo"
 	"golang.org/x/sync/semaphore"
 )
 
@@ -60,8 +61,8 @@ func (s *Server) RunTapMode(ctx context.Context) error {
 			wsErr <- err
 			return
 		}
+		s.ws = conn
 
-		// handle events!
 		for {
 			var evt TapEvent
 			err := conn.ReadJSON(&evt)
@@ -187,9 +188,36 @@ func (s *Server) handleTapEvent(ctx context.Context, evt *TapEvent) error {
 	}
 
 	for _, evtBytes := range evtsToProduce {
-		if err := s.produceAsync(ctx, evtKey, evtBytes); err != nil {
+		if err := s.produceAsyncTap(ctx, evtKey, evtBytes, evt.Id); err != nil {
 			return err
 		}
+	}
+
+	return nil
+}
+
+func (s *Server) produceAsyncTap(ctx context.Context, key string, msg []byte, id int64) error {
+	logger := s.logger.With("name", "produceAsyncTap", "key", key, "id", id)
+	callback := func(r *kgo.Record, err error) {
+		status := "ok"
+		if err != nil {
+			status = "error"
+			logger.Error("error producing message", "err", err)
+		} else if s.ws != nil {
+			if err := s.ws.WriteJSON(TapAck{
+				Type: "ack",
+				Id:   id,
+			}); err != nil {
+				logger.Error("error sending ack", "err", err)
+				status = "ack_error"
+			}
+		}
+
+		producedEvents.WithLabelValues(status).Inc()
+	}
+
+	if err := s.producer.ProduceAsync(ctx, key, msg, callback); err != nil {
+		return fmt.Errorf("failed to produce message: %w", err)
 	}
 
 	return nil

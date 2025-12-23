@@ -29,6 +29,7 @@ import (
 type Server struct {
 	relayHost        string
 	tapHost          string
+	disableAcks      bool
 	bootstrapServers []string
 	outputTopic      string
 	ospreyCompat     bool
@@ -43,14 +44,16 @@ type Server struct {
 	plcClient *PlcClient
 	apiClient *ApiClient
 	logger    *slog.Logger
+	ws        *websocket.Conn
 }
 
 type ServerArgs struct {
 	// network params
-	RelayHost string
-	TapHost   string
-	PlcHost   string
-	ApiHost   string
+	RelayHost   string
+	TapHost     string
+	DisableAcks bool
+	PlcHost     string
+	ApiHost     string
 
 	// for watched and ignoed services or collections, only one list may be supplied
 	// for both services and collections, wildcards are acceptable. for example:
@@ -116,6 +119,7 @@ func NewServer(args *ServerArgs) (*Server, error) {
 	s := &Server{
 		relayHost:        args.RelayHost,
 		tapHost:          args.TapHost,
+		disableAcks:      args.DisableAcks,
 		plcClient:        plcClient,
 		apiClient:        apiClient,
 		bootstrapServers: args.BootstrapServers,

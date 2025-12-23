@@ -112,6 +112,11 @@ func main() {
 						Value:   "ws://localhost:2480",
 						EnvVars: []string{"ATKAFKA_TAP_HOST"},
 					},
+					&cli.BoolFlag{
+						Name:    "disable-acks",
+						Usage:   "Set to `true` to disable sending of event acks to Tap. May result in the loss of events.",
+						EnvVars: []string{"ATKAFKA_DISABLE_ACKS"},
+					},
 				},
 				Action: func(cmd *cli.Context) error {
 
@@ -122,6 +127,7 @@ func main() {
 
 					s, err := atkafka.NewServer(&atkafka.ServerArgs{
 						TapHost:            cmd.String("tap-host"),
+						DisableAcks:        cmd.Bool("disable-acks"),
 						BootstrapServers:   cmd.StringSlice("bootstrap-servers"),
 						OutputTopic:        cmd.String("output-topic"),
 						WatchedCollections: cmd.StringSlice("watched-collections"),

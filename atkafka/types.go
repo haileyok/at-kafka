@@ -90,3 +90,8 @@ type TapEventIdentity struct {
 	IsActive bool   `json:"isActive"`
 	Status   string `json:"status"`
 }
+
+type TapAck struct {
+	Type string `json:"type"`
+	Id   int64  `json:"id"`
+}
