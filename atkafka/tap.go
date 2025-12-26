@@ -46,7 +46,7 @@ func (s *Server) RunTapMode(ctx context.Context) error {
 	s.logger.Info("created dialer")
 
 	evtQueue := make(chan TapEvent, 10_000)
-	for range 10 {
+	for range s.tapWorkers {
 		go func() {
 			for evt := range evtQueue {
 				s.handleTapEvent(ctx, &evt)
