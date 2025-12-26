@@ -16,12 +16,9 @@ import (
 	"github.com/bluesky-social/indigo/atproto/syntax"
 	"github.com/gorilla/websocket"
 	"github.com/twmb/franz-go/pkg/kgo"
-	"golang.org/x/sync/semaphore"
 )
 
 func (s *Server) RunTapMode(ctx context.Context) error {
-	sema := semaphore.NewWeighted(1_000)
-
 	s.logger.Info("starting tap consumer", "tap-host", s.tapHost, "bootstrap-servers", s.bootstrapServers, "output-topic", s.outputTopic)
 
 	createCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -47,8 +44,41 @@ func (s *Server) RunTapMode(ctx context.Context) error {
 	u.Path = "/channel"
 	s.logger.Info("created dialer")
 
+	evtQueue := make(chan TapEvent, 10_000)
+	for range 10 {
+		go func() {
+			for evt := range evtQueue {
+				s.handleTapEvent(ctx, &evt)
+			}
+		}()
+	}
+
+	ackQueue := make(chan int64, 1_000)
+	go func() {
+		for id := range ackQueue {
+			if s.ws != nil {
+				func() {
+					status := "ok"
+					defer func() {
+						acksSent.WithLabelValues(status).Inc()
+					}()
+
+					if !s.disableAcks {
+						if err := s.ws.WriteJSON(TapAck{
+							Type: "ack",
+							Id:   id,
+						}); err != nil {
+							s.logger.Error("error sending ack", "err", err)
+							status = "error"
+						}
+					}
+				}()
+			}
+		}
+	}()
+	s.ackQueue = ackQueue
+
 	wsErr := make(chan error, 1)
-	shutdownWs := make(chan struct{}, 1)
 	go func() {
 		logger := s.logger.With("component", "websocket")
 
@@ -62,30 +92,26 @@ func (s *Server) RunTapMode(ctx context.Context) error {
 			return
 		}
 		s.ws = conn
+		defer conn.Close()
 
 		for {
 			var evt TapEvent
 			err := conn.ReadJSON(&evt)
 			if err != nil {
 				logger.Error("error reading json from websocket", "err", err)
-				break
+				wsErr <- err
+				return
 			}
 
-			if err := sema.Acquire(ctx, 1); err != nil {
-				logger.Error("error acquring sema", "err", err)
-				break
+			select {
+			case evtQueue <- evt:
+			case <-ctx.Done():
+				wsErr <- ctx.Err()
+				return
 			}
-
-			go func() {
-				defer sema.Release(1)
-				s.handleTapEvent(ctx, &evt)
-			}()
 		}
-
-		<-shutdownWs
-
-		wsErr <- nil
 	}()
+
 	s.logger.Info("created tap consumer")
 
 	signals := make(chan os.Signal, 1)
@@ -102,7 +128,8 @@ func (s *Server) RunTapMode(ctx context.Context) error {
 		}
 	}
 
-	close(shutdownWs)
+	close(evtQueue)
+	close(ackQueue)
 
 	return nil
 }
@@ -200,25 +227,20 @@ func (s *Server) produceAsyncTap(ctx context.Context, key string, msg []byte, id
 	logger := s.logger.With("name", "produceAsyncTap", "key", key, "id", id)
 	callback := func(r *kgo.Record, err error) {
 		status := "ok"
-		ackStatus := "ok"
 
 		defer func() {
 			producedEvents.WithLabelValues(status).Inc()
-			if s.ws != nil && !s.disableAcks {
-				acksSent.WithLabelValues(ackStatus).Inc()
-			}
 		}()
 
 		if err != nil {
 			logger.Error("error producing message", "err", err)
 			status = "error"
-		} else if s.ws != nil && !s.disableAcks {
-			if err := s.ws.WriteJSON(TapAck{
-				Type: "ack",
-				Id:   id,
-			}); err != nil {
-				logger.Error("error sending ack", "err", err)
-				ackStatus = "error"
+		} else if !s.disableAcks {
+			select {
+			case s.ackQueue <- id:
+			default:
+				logger.Warn("dropped ack event", "id", id)
+				acksSent.WithLabelValues("dropped").Inc()
 			}
 		}
 	}
