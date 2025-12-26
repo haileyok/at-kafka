@@ -67,7 +67,7 @@ type EventMetadata struct {
 }
 
 type TapEvent struct {
-	Id       int64             `json:"id"`
+	Id       uint              `json:"id"`
 	Type     string            `json:"type"`
 	Record   *TapEventRecord   `json:"record,omitempty"`
 	Identity *TapEventIdentity `json:"identity,omitempty"`
@@ -93,5 +93,5 @@ type TapEventIdentity struct {
 
 type TapAck struct {
 	Type string `json:"type"`
-	Id   int64  `json:"id"`
+	Id   uint   `json:"id"`
 }

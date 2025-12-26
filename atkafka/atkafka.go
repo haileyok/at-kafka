@@ -46,7 +46,7 @@ type Server struct {
 	apiClient *ApiClient
 	logger    *slog.Logger
 	ws        *websocket.Conn
-	ackQueue  chan int64
+	ackQueue  chan uint
 }
 
 type ServerArgs struct {

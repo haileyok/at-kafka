@@ -53,7 +53,7 @@ func (s *Server) RunTapMode(ctx context.Context) error {
 		}()
 	}
 
-	ackQueue := make(chan int64, 10_000)
+	ackQueue := make(chan uint, 10_000)
 	go func() {
 		for id := range ackQueue {
 			func() {
@@ -219,6 +219,9 @@ func (s *Server) handleTapEvent(ctx context.Context, evt *TapEvent) error {
 		}
 
 		evtsToProduce = append(evtsToProduce, evtBytes)
+	} else {
+		// TODO: actually handle identity events
+		s.ackEvent(ctx, evt.Id)
 	}
 
 	for _, evtBytes := range evtsToProduce {
@@ -230,7 +233,7 @@ func (s *Server) handleTapEvent(ctx context.Context, evt *TapEvent) error {
 	return nil
 }
 
-func (s *Server) produceAsyncTap(ctx context.Context, key string, msg []byte, id int64) error {
+func (s *Server) produceAsyncTap(ctx context.Context, key string, msg []byte, id uint) error {
 	logger := s.logger.With("name", "produceAsyncTap", "key", key, "id", id)
 	callback := func(r *kgo.Record, err error) {
 		status := "ok"
@@ -243,15 +246,7 @@ func (s *Server) produceAsyncTap(ctx context.Context, key string, msg []byte, id
 			logger.Error("error producing message", "err", err)
 			status = "error"
 		} else if !s.disableAcks {
-			ackCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-			defer cancel()
-
-			select {
-			case s.ackQueue <- id:
-			case <-ackCtx.Done():
-				logger.Warn("dropped ack event", "id", id, "err", ackCtx.Err())
-				acksSent.WithLabelValues("dropped").Inc()
-			}
+			s.ackEvent(ctx, id)
 		}
 	}
 
@@ -260,6 +255,18 @@ func (s *Server) produceAsyncTap(ctx context.Context, key string, msg []byte, id
 	}
 
 	return nil
+}
+
+func (s *Server) ackEvent(ctx context.Context, id uint) {
+	ackCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	select {
+	case s.ackQueue <- id:
+	case <-ackCtx.Done():
+		s.logger.Warn("dropped ack event", "id", id, "err", ackCtx.Err())
+		acksSent.WithLabelValues("dropped").Inc()
+	}
 }
 
 func parseTimeFromRecord(collection string, rec map[string]any, rkey string) (*time.Time, error) {
