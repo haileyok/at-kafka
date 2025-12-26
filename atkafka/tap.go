@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/signal"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
@@ -55,32 +54,35 @@ func (s *Server) RunTapMode(ctx context.Context) error {
 	}
 
 	ackQueue := make(chan int64, 10_000)
-	var ackLk sync.Mutex
-	for range 10 {
-		go func() {
-			for id := range ackQueue {
-				func() {
-					status := "ok"
-					defer func() {
-						acksSent.WithLabelValues(status).Inc()
-					}()
-
-					if !s.disableAcks {
-						ackLk.Lock()
-						defer ackLk.Unlock()
-						if err := s.ws.WriteJSON(TapAck{
-							Type: "ack",
-							Id:   id,
-						}); err != nil {
-							s.logger.Error("error sending ack", "err", err)
-							status = "error"
-						}
-					}
+	go func() {
+		for id := range ackQueue {
+			func() {
+				status := "ok"
+				defer func() {
+					acksSent.WithLabelValues(status).Inc()
 				}()
-			}
-		}()
-	}
+
+				if !s.disableAcks {
+					if err := s.ws.WriteJSON(TapAck{
+						Type: "ack",
+						Id:   id,
+					}); err != nil {
+						s.logger.Error("error sending ack", "err", err)
+						status = "error"
+					}
+				}
+			}()
+		}
+	}()
 	s.ackQueue = ackQueue
+
+	bufferSizeTicker := time.NewTicker(5 * time.Second)
+	go func() {
+		for range bufferSizeTicker.C {
+			tapEvtBufferSize.Set(float64(len(evtQueue)))
+			tapAckBufferSize.Set(float64(len(ackQueue)))
+		}
+	}()
 
 	wsErr := make(chan error, 1)
 	go func() {
@@ -132,6 +134,7 @@ func (s *Server) RunTapMode(ctx context.Context) error {
 		}
 	}
 
+	bufferSizeTicker.Stop()
 	close(evtQueue)
 	close(ackQueue)
 
