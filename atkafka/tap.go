@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -53,10 +54,11 @@ func (s *Server) RunTapMode(ctx context.Context) error {
 		}()
 	}
 
-	ackQueue := make(chan int64, 1_000)
-	go func() {
-		for id := range ackQueue {
-			if s.ws != nil {
+	ackQueue := make(chan int64, 10_000)
+	var ackLk sync.Mutex
+	for range 10 {
+		go func() {
+			for id := range ackQueue {
 				func() {
 					status := "ok"
 					defer func() {
@@ -64,6 +66,8 @@ func (s *Server) RunTapMode(ctx context.Context) error {
 					}()
 
 					if !s.disableAcks {
+						ackLk.Lock()
+						defer ackLk.Unlock()
 						if err := s.ws.WriteJSON(TapAck{
 							Type: "ack",
 							Id:   id,
@@ -74,8 +78,8 @@ func (s *Server) RunTapMode(ctx context.Context) error {
 					}
 				}()
 			}
-		}
-	}()
+		}()
+	}
 	s.ackQueue = ackQueue
 
 	wsErr := make(chan error, 1)
@@ -236,10 +240,13 @@ func (s *Server) produceAsyncTap(ctx context.Context, key string, msg []byte, id
 			logger.Error("error producing message", "err", err)
 			status = "error"
 		} else if !s.disableAcks {
+			ackCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			defer cancel()
+
 			select {
 			case s.ackQueue <- id:
-			default:
-				logger.Warn("dropped ack event", "id", id)
+			case <-ackCtx.Done():
+				logger.Warn("dropped ack event", "id", id, "err", ackCtx.Err())
 				acksSent.WithLabelValues("dropped").Inc()
 			}
 		}
