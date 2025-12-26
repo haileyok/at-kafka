@@ -202,7 +202,7 @@ func (s *Server) produceAsyncTap(ctx context.Context, key string, msg []byte, id
 		status := "ok"
 		ackStatus := "ok"
 
-		go func() {
+		defer func() {
 			producedEvents.WithLabelValues(status).Inc()
 			if s.ws != nil && !s.disableAcks {
 				acksSent.WithLabelValues(ackStatus).Inc()
