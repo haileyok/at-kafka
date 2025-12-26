@@ -144,18 +144,14 @@ func (s *Server) RunTapMode(ctx context.Context) error {
 func (s *Server) handleTapEvent(ctx context.Context, evt *TapEvent) error {
 	logger := s.logger.With("component", "handleEvent")
 
-	var collection string
-	var actionName string
-
-	var evtKey string
-	var evtsToProduce [][]byte
+	defer func() {
+		s.ackEvent(ctx, evt.Id)
+	}()
 
 	if evt.Record != nil {
-		// key events by DID
-		evtKey = evt.Record.Did
 		did := evt.Record.Did
 		kind := evt.Record.Action
-		collection = evt.Record.Collection
+		collection := evt.Record.Collection
 		rkey := evt.Record.Rkey
 		atUri := fmt.Sprintf("at://%s/%s/%s", did, collection, rkey)
 
@@ -182,7 +178,7 @@ func (s *Server) handleTapEvent(ctx context.Context, evt *TapEvent) error {
 			return nil
 		}
 
-		actionName = "operation#" + kind
+		actionName := "operation#" + kind
 
 		handledEvents.WithLabelValues(actionName, collection).Inc()
 
@@ -218,14 +214,7 @@ func (s *Server) handleTapEvent(ctx context.Context, evt *TapEvent) error {
 			return fmt.Errorf("failed to marshal kafka event: %w", err)
 		}
 
-		evtsToProduce = append(evtsToProduce, evtBytes)
-	} else {
-		// TODO: actually handle identity events
-		s.ackEvent(ctx, evt.Id)
-	}
-
-	for _, evtBytes := range evtsToProduce {
-		if err := s.produceAsyncTap(ctx, evtKey, evtBytes, evt.Id); err != nil {
+		if err := s.produceAsyncTap(ctx, did, evtBytes); err != nil {
 			return err
 		}
 	}
@@ -233,20 +222,16 @@ func (s *Server) handleTapEvent(ctx context.Context, evt *TapEvent) error {
 	return nil
 }
 
-func (s *Server) produceAsyncTap(ctx context.Context, key string, msg []byte, id uint) error {
-	logger := s.logger.With("name", "produceAsyncTap", "key", key, "id", id)
+func (s *Server) produceAsyncTap(ctx context.Context, key string, msg []byte) error {
+	logger := s.logger.With("name", "produceAsyncTap", "key", key)
 	callback := func(r *kgo.Record, err error) {
 		status := "ok"
-
 		defer func() {
 			producedEvents.WithLabelValues(status).Inc()
 		}()
-
 		if err != nil {
 			logger.Error("error producing message", "err", err)
 			status = "error"
-		} else if !s.disableAcks {
-			s.ackEvent(ctx, id)
 		}
 	}
 
