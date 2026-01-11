@@ -1,55 +1,83 @@
 # at-kafka
 
-A small service that receives events from the AT firehose and produces them to Kafka. Supports standard JSON outputs as well as [Osprey](https://github.com/roostorg/osprey)
-formatted events.
-
-Additionally, at-kafka supports subscribing to [Tap](https://github.com/bluesky-social/indigo/tree/main/cmd/tap) if youare attempting to perform a network backfill.
+A small service that receives events from ATProto and produces them to Kafka. Supports:
+- Firehose events from relay or [Tap](https://github.com/bluesky-social/indigo/tree/main/cmd/tap) (for network backfill)
+- Ozone moderation events
+- Standard JSON and [Osprey](https://github.com/roostorg/osprey)-compatible event formats
 
 ## Usage
 
 ### Docker Compose
 
-The included `docker-compose.yml` provides a complete local stack. Edit the environment variables in the file to customize:
+Three compose files are provided:
+
+```bash
+# Firehose relay mode (default)
+docker compose up -d
+
+# Firehose tap mode (for backfill)
+docker compose -f docker-compose.tap.yml up -d
+
+# Ozone moderation events
+docker compose -f docker-compose.ozone.yml up -d
+```
+
+#### Firehose Configuration
 
 ```yaml
 environment:
-  # For relay mode
-  ATKAFKA_RELAY_HOST: "wss://bsky.network" # ATProto relay to subscribe to for events
+  # Relay/Tap connection
+  ATKAFKA_RELAY_HOST: "wss://bsky.network"
+  ATKAFKA_TAP_HOST: "ws://localhost:2480"
+  ATKAFKA_DISABLE_ACKS: false
 
-  # For tap mode
-  ATKAFKA_TAP_HOST: "ws://localhost:2480" # Tap websocket host to subscribe to for events
-  ATKAFKA_DISABLE_ACKS: false # Whether to disable sending of acks to Tap
+  # Kafka
+  ATKAFKA_BOOTSTRAP_SERVERS: "kafka:29092"
+  ATKAFKA_OUTPUT_TOPIC: "atproto-events"
+  ATKAFKA_OSPREY_COMPATIBLE: false
 
-  # Kafka configuration
-  ATKAFKA_BOOTSTRAP_SERVERS: "kafka:29092" # Kafka bootstrap servers, comma separated
-  ATKAFKA_OUTPUT_TOPIC: "atproto-events" # The output topic for events
-  ATKAFKA_OSPREY_COMPATIBLE: false # Whether to produce Osprey-compatible events
-
-  # Match only Blacksky PDS users
-  ATKAFKA_MATCHED_SERVICES: "blacksky.app" # A comma-separated list of PDSes to emit events for
-  # OR ignore anyone on Bluesky PBC PDSes
-  ATKAFKA_IGNORED_SERVICES: "*.bsky.network" # OR a comma-separated list of PDSes to _not_ emit events for
-
-  # Match only Teal.fm records
-  ATKAFKA_MATCHED_COLLECTIONS: "fm.teal.*" # A comma-separated list of collections to emit events for
-  # OR ignore all Bluesky records
-  ATKAFKA_IGNORED_COLLECTIONS: "app.bsky.*" # OR a comma-separated list of collections to ignore events for
+  # Filtering
+  ATKAFKA_WATCHED_SERVICES: "*.bsky.network"
+  ATKAFKA_IGNORED_SERVICES: "blacksky.app"
+  ATKAFKA_WATCHED_COLLECTIONS: "app.bsky.*"
+  ATKAFKA_IGNORED_COLLECTIONS: "fm.teal.*"
 ```
 
-Then start:
+#### Ozone Configuration
+
+```yaml
+environment:
+  # Ozone connection
+  ATKAFKA_OZONE_PDS_HOST: "https://pds.example.com"
+  ATKAFKA_OZONE_IDENTIFIER: "your.handle"
+  ATKAFKA_OZONE_PASSWORD: "password"
+  ATKAFKA_OZONE_LABELER_DID: "did:plc:..."
+
+  # Kafka
+  ATKAFKA_BOOTSTRAP_SERVERS: "kafka:29092"
+  ATKAFKA_OUTPUT_TOPIC: "ozone-events"
+```
+
+### CLI
 
 ```bash
-# For normal mode
-docker compose up -d
+# Firehose modes
+atkafka firehose relay --bootstrap-servers localhost:9092 --output-topic events
+atkafka firehose tap --tap-host ws://localhost:2480 --bootstrap-servers localhost:9092 --output-topic events
 
-# For tap mode
-docker compose -f docker-compose.tap.yml up -d
-
+# Ozone mode
+atkafka ozone-events \
+  --pds-host https://pds.example.com \
+  --identifier admin@example.com \
+  --password password \
+  --labeler-did did:plc:... \
+  --bootstrap-servers localhost:9092 \
+  --output-topic ozone-events
 ```
 
 ## Event Structure
 
-### Standard Mode
+### Firehose Events
 
 Events are structured similarly to the raw AT Protocol firehose, with one key difference: **commit events are split into individual operation events**.
 
@@ -128,6 +156,10 @@ Action names in Osprey mode:
 - `account` - Account status changes
 - `identity` - Identity/handle changes
 - `info` - Informational messages
+
+### Ozone Events
+
+Ozone events are produced as-is from the `tools.ozone.moderation.queryEvents` API response. Events include moderation actions, reports, and other moderation activity. The cursor is persisted to disk and automatically resumed on restart.
 
 ## Monitoring
 
