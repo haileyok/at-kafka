@@ -27,9 +27,13 @@ services:
       ATKAFKA_OSPREY_COMPATIBLE: "false"
       ATKAFKA_PLC_HOST: "https://plc.directory"
       ATKAFKA_API_HOST: "https://public.api.bsky.app"
+    volumes:
+      - atkafka-data:/data
+    working_dir: /data
     restart: unless-stopped
 
 volumes:
   zookeeper-data:
   zookeeper-logs:
   kafka-data:
+  atkafka-data:
