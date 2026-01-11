@@ -75,7 +75,7 @@ services:
     ports:
       # metrics port
       - "6009:6009"
-    command: ["tap-mode"]
+    command: ["firehose", "tap"]
     environment:
       ATKAFKA_TAP_HOST: "ws://tap:2480"
       ATKAFKA_DISABLE_ACKS: false
