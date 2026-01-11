@@ -29,6 +29,7 @@ import (
 type Server struct {
 	relayHost        string
 	tapHost          string
+	tapWorkers       int
 	disableAcks      bool
 	bootstrapServers []string
 	outputTopic      string
@@ -45,12 +46,14 @@ type Server struct {
 	apiClient *ApiClient
 	logger    *slog.Logger
 	ws        *websocket.Conn
+	ackQueue  chan uint
 }
 
 type ServerArgs struct {
 	// network params
 	RelayHost   string
 	TapHost     string
+	TapWorkers  int
 	DisableAcks bool
 	PlcHost     string
 	ApiHost     string
@@ -119,6 +122,7 @@ func NewServer(args *ServerArgs) (*Server, error) {
 	s := &Server{
 		relayHost:        args.RelayHost,
 		tapHost:          args.TapHost,
+		tapWorkers:       args.TapWorkers,
 		disableAcks:      args.DisableAcks,
 		plcClient:        plcClient,
 		apiClient:        apiClient,

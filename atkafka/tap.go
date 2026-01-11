@@ -16,12 +16,9 @@ import (
 	"github.com/bluesky-social/indigo/atproto/syntax"
 	"github.com/gorilla/websocket"
 	"github.com/twmb/franz-go/pkg/kgo"
-	"golang.org/x/sync/semaphore"
 )
 
 func (s *Server) RunTapMode(ctx context.Context) error {
-	sema := semaphore.NewWeighted(1_000)
-
 	s.logger.Info("starting tap consumer", "tap-host", s.tapHost, "bootstrap-servers", s.bootstrapServers, "output-topic", s.outputTopic)
 
 	createCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -47,8 +44,47 @@ func (s *Server) RunTapMode(ctx context.Context) error {
 	u.Path = "/channel"
 	s.logger.Info("created dialer")
 
+	evtQueue := make(chan TapEvent, 10_000)
+	for range s.tapWorkers {
+		go func() {
+			for evt := range evtQueue {
+				s.handleTapEvent(ctx, &evt)
+			}
+		}()
+	}
+
+	ackQueue := make(chan uint, 10_000)
+	go func() {
+		for id := range ackQueue {
+			func() {
+				status := "ok"
+				defer func() {
+					acksSent.WithLabelValues(status).Inc()
+				}()
+
+				if !s.disableAcks {
+					if err := s.ws.WriteJSON(TapAck{
+						Type: "ack",
+						Id:   id,
+					}); err != nil {
+						s.logger.Error("error sending ack", "err", err)
+						status = "error"
+					}
+				}
+			}()
+		}
+	}()
+	s.ackQueue = ackQueue
+
+	bufferSizeTicker := time.NewTicker(5 * time.Second)
+	go func() {
+		for range bufferSizeTicker.C {
+			tapEvtBufferSize.Set(float64(len(evtQueue)))
+			tapAckBufferSize.Set(float64(len(ackQueue)))
+		}
+	}()
+
 	wsErr := make(chan error, 1)
-	shutdownWs := make(chan struct{}, 1)
 	go func() {
 		logger := s.logger.With("component", "websocket")
 
@@ -62,30 +98,26 @@ func (s *Server) RunTapMode(ctx context.Context) error {
 			return
 		}
 		s.ws = conn
+		defer conn.Close()
 
 		for {
 			var evt TapEvent
 			err := conn.ReadJSON(&evt)
 			if err != nil {
 				logger.Error("error reading json from websocket", "err", err)
-				break
+				wsErr <- err
+				return
 			}
 
-			if err := sema.Acquire(ctx, 1); err != nil {
-				logger.Error("error acquring sema", "err", err)
-				break
+			select {
+			case evtQueue <- evt:
+			case <-ctx.Done():
+				wsErr <- ctx.Err()
+				return
 			}
-
-			go func() {
-				defer sema.Release(1)
-				s.handleTapEvent(ctx, &evt)
-			}()
 		}
-
-		<-shutdownWs
-
-		wsErr <- nil
 	}()
+
 	s.logger.Info("created tap consumer")
 
 	signals := make(chan os.Signal, 1)
@@ -102,7 +134,9 @@ func (s *Server) RunTapMode(ctx context.Context) error {
 		}
 	}
 
-	close(shutdownWs)
+	bufferSizeTicker.Stop()
+	close(evtQueue)
+	close(ackQueue)
 
 	return nil
 }
@@ -110,18 +144,14 @@ func (s *Server) RunTapMode(ctx context.Context) error {
 func (s *Server) handleTapEvent(ctx context.Context, evt *TapEvent) error {
 	logger := s.logger.With("component", "handleEvent")
 
-	var collection string
-	var actionName string
-
-	var evtKey string
-	var evtsToProduce [][]byte
+	defer func() {
+		s.ackEvent(ctx, evt.Id)
+	}()
 
 	if evt.Record != nil {
-		// key events by DID
-		evtKey = evt.Record.Did
 		did := evt.Record.Did
 		kind := evt.Record.Action
-		collection = evt.Record.Collection
+		collection := evt.Record.Collection
 		rkey := evt.Record.Rkey
 		atUri := fmt.Sprintf("at://%s/%s/%s", did, collection, rkey)
 
@@ -148,7 +178,7 @@ func (s *Server) handleTapEvent(ctx context.Context, evt *TapEvent) error {
 			return nil
 		}
 
-		actionName = "operation#" + kind
+		actionName := "operation#" + kind
 
 		handledEvents.WithLabelValues(actionName, collection).Inc()
 
@@ -184,11 +214,7 @@ func (s *Server) handleTapEvent(ctx context.Context, evt *TapEvent) error {
 			return fmt.Errorf("failed to marshal kafka event: %w", err)
 		}
 
-		evtsToProduce = append(evtsToProduce, evtBytes)
-	}
-
-	for _, evtBytes := range evtsToProduce {
-		if err := s.produceAsyncTap(ctx, evtKey, evtBytes, evt.Id); err != nil {
+		if err := s.produceAsyncTap(ctx, did, evtBytes); err != nil {
 			return err
 		}
 	}
@@ -196,30 +222,16 @@ func (s *Server) handleTapEvent(ctx context.Context, evt *TapEvent) error {
 	return nil
 }
 
-func (s *Server) produceAsyncTap(ctx context.Context, key string, msg []byte, id int64) error {
-	logger := s.logger.With("name", "produceAsyncTap", "key", key, "id", id)
+func (s *Server) produceAsyncTap(ctx context.Context, key string, msg []byte) error {
+	logger := s.logger.With("name", "produceAsyncTap", "key", key)
 	callback := func(r *kgo.Record, err error) {
 		status := "ok"
-		ackStatus := "ok"
-
-		go func() {
+		defer func() {
 			producedEvents.WithLabelValues(status).Inc()
-			if s.ws != nil && !s.disableAcks {
-				acksSent.WithLabelValues(ackStatus).Inc()
-			}
 		}()
-
 		if err != nil {
 			logger.Error("error producing message", "err", err)
 			status = "error"
-		} else if s.ws != nil && !s.disableAcks {
-			if err := s.ws.WriteJSON(TapAck{
-				Type: "ack",
-				Id:   id,
-			}); err != nil {
-				logger.Error("error sending ack", "err", err)
-				ackStatus = "error"
-			}
 		}
 	}
 
@@ -228,6 +240,18 @@ func (s *Server) produceAsyncTap(ctx context.Context, key string, msg []byte, id
 	}
 
 	return nil
+}
+
+func (s *Server) ackEvent(ctx context.Context, id uint) {
+	ackCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	select {
+	case s.ackQueue <- id:
+	case <-ackCtx.Done():
+		s.logger.Warn("dropped ack event", "id", id, "err", ackCtx.Err())
+		acksSent.WithLabelValues("dropped").Inc()
+	}
 }
 
 func parseTimeFromRecord(collection string, rec map[string]any, rkey string) (*time.Time, error) {

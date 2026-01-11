@@ -51,6 +51,12 @@ func main() {
 						Usage:   "The API host for making XRPC calls. Recommended to use https://public.api.bsky.app",
 						EnvVars: []string{"ATKAFKA_API_HOST"},
 					},
+					&cli.IntFlag{
+						Name:    "tap-workers",
+						Usage:   "Number of workers to process events from Tap",
+						Value:   10,
+						EnvVars: []string{"ATKAFKA_TAP_WORKERS"},
+					},
 					&cli.BoolFlag{
 						Name:    "osprey-compatible",
 						Usage:   "Whether or not events should be formulated in an Osprey-compatible format",

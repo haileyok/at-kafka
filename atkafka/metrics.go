@@ -35,4 +35,14 @@ var (
 		Namespace: "atkafka",
 		Name:      "acks_sent",
 	}, []string{"status"})
+
+	tapEvtBufferSize = promauto.NewGauge(prometheus.GaugeOpts{
+		Namespace: "atkafka",
+		Name:      "tap_event_buffer_size",
+	})
+
+	tapAckBufferSize = promauto.NewGauge(prometheus.GaugeOpts{
+		Namespace: "atkafka",
+		Name:      "tap_ack_event_buffer_size",
+	})
 )
