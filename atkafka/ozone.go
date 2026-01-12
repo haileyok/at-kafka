@@ -184,6 +184,15 @@ func (s *OzoneServer) Run(ctx context.Context) error {
 func (s *OzoneServer) UpdateCursor(cursor string) error {
 	s.cursorMu.Lock()
 	defer s.cursorMu.Unlock()
+
+	// HACK: do this so we avoid fetching the same last item with after. ideally would use the id or something
+	// from the response, but i am lazy for now in this and its extremely unlikely to happen anyway
+	timestamp, err := time.Parse(cursor, time.RFC3339Nano)
+	if err != nil {
+		return fmt.Errorf("failed to parse timestmap: %w", err)
+	}
+	cursor = timestamp.Add(time.Millisecond).UTC().Format(time.RFC3339Nano)
+
 	s.cursor = cursor
 	if err := os.WriteFile("ozone-cursor.txt", []byte(cursor), 0644); err != nil {
 		return fmt.Errorf("failed to write cursor: %w", err)
