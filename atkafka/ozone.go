@@ -187,7 +187,7 @@ func (s *OzoneServer) UpdateCursor(cursor string) error {
 
 	// HACK: do this so we avoid fetching the same last item with after. ideally would use the id or something
 	// from the response, but i am lazy for now in this and its extremely unlikely to happen anyway
-	timestamp, err := time.Parse(cursor, time.RFC3339Nano)
+	timestamp, err := time.Parse(time.RFC3339Nano, cursor)
 	if err != nil {
 		return fmt.Errorf("failed to parse timestmap: %w", err)
 	}
