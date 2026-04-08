@@ -27,8 +27,12 @@ type IdentityResolverArgs struct {
 	PlcHost string
 }
 
+const (
+	DefaultPLCHost = "https://plc.directory"
+)
+
 func NewIdentityResolver(args *IdentityResolverArgs) *IdentityResolver {
-	plcHost := "https://plc.directory"
+	plcHost := DefaultPLCHost
 	if args.PlcHost != "" {
 		plcHost = args.PlcHost
 	}
