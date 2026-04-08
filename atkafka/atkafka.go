@@ -41,12 +41,12 @@ type Server struct {
 	watchedCollections []string
 	ignoredCollections []string
 
-	producer  *Producer
-	plcClient *PlcClient
-	apiClient *ApiClient
-	logger    *slog.Logger
-	ws        *websocket.Conn
-	ackQueue  chan uint
+	producer         *Producer
+	identityResolver *IdentityResolver
+	apiClient        *ApiClient
+	logger           *slog.Logger
+	ws               *websocket.Conn
+	ackQueue         chan uint
 }
 
 type ServerArgs struct {
@@ -101,12 +101,9 @@ func NewServer(args *ServerArgs) (*Server, error) {
 		return nil, fmt.Errorf("you may only specify a list of watched collections _or_ ignored collections, not both")
 	}
 
-	var plcClient *PlcClient
-	if args.PlcHost != "" {
-		plcClient = NewPlcClient(&PlcClientArgs{
-			PlcHost: args.PlcHost,
-		})
-	}
+	identityResolver := NewIdentityResolver(&IdentityResolverArgs{
+		PlcHost: args.PlcHost,
+	})
 
 	var apiClient *ApiClient
 	if args.ApiHost != "" {
@@ -124,7 +121,7 @@ func NewServer(args *ServerArgs) (*Server, error) {
 		tapHost:          args.TapHost,
 		tapWorkers:       args.TapWorkers,
 		disableAcks:      args.DisableAcks,
-		plcClient:        plcClient,
+		identityResolver: identityResolver,
 		apiClient:        apiClient,
 		bootstrapServers: args.BootstrapServers,
 		outputTopic:      args.OutputTopic,
@@ -253,39 +250,37 @@ func (s *Server) FetchEventMetadata(ctx context.Context, did string) (*EventMeta
 
 	var wg sync.WaitGroup
 
-	if s.plcClient != nil {
-		wg.Go(func() {
-			logger := s.logger.With("component", "didDoc")
-			var err error
-			ident, err = s.plcClient.GetIdentity(ctx, did)
-			if err != nil {
-				logger.Error("error fetching did doc", "did", did, "err", err)
-				return
-			}
-			didDocument = ident.DIDDocument()
-			pdsHost = ident.PDSEndpoint()
-			handle = ident.Handle.String()
-		})
+	wg.Go(func() {
+		logger := s.logger.With("component", "didDoc")
+		var err error
+		ident, err = s.identityResolver.GetIdentity(ctx, did)
+		if err != nil {
+			logger.Error("error fetching did doc", "did", did, "err", err)
+			return
+		}
+		didDocument = ident.DIDDocument()
+		pdsHost = ident.PDSEndpoint()
+		handle = ident.Handle.String()
+	})
 
-		wg.Go(func() {
-			logger := s.logger.With("component", "auditLog")
-			auditLog, err := s.plcClient.GetDIDAuditLog(ctx, did)
-			if err != nil {
-				logger.Error("error fetching did audit log", "did", did, "err", err)
-				return
-			}
+	wg.Go(func() {
+		logger := s.logger.With("component", "auditLog")
+		auditLog, err := s.identityResolver.GetDIDAuditLog(ctx, did)
+		if err != nil {
+			logger.Error("error fetching did audit log", "did", did, "err", err)
+			return
+		}
 
-			didCreatedAt = auditLog.CreatedAt
+		didCreatedAt = auditLog.CreatedAt
 
-			createdAt, err := time.Parse(time.RFC3339Nano, auditLog.CreatedAt)
-			if err != nil {
-				logger.Error("error parsing timestamp in audit log", "did", did, "timestamp", auditLog.CreatedAt, "err", err)
-				return
-			}
+		createdAt, err := time.Parse(time.RFC3339Nano, auditLog.CreatedAt)
+		if err != nil {
+			logger.Error("error parsing timestamp in audit log", "did", did, "timestamp", auditLog.CreatedAt, "err", err)
+			return
+		}
 
-			accountAge = int64(time.Since(createdAt).Seconds())
-		})
-	}
+		accountAge = int64(time.Since(createdAt).Seconds())
+	})
 
 	if s.apiClient != nil {
 		wg.Go(func() {
