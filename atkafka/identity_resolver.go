@@ -16,23 +16,28 @@ import (
 	"golang.org/x/time/rate"
 )
 
-type PlcClient struct {
+type IdentityResolver struct {
 	client     *http.Client
 	dir        *identity.CacheDirectory
 	auditCache *lru.LRU[string, *DidAuditEntry]
 	plcHost    string
 }
 
-type PlcClientArgs struct {
+type IdentityResolverArgs struct {
 	PlcHost string
 }
 
-func NewPlcClient(args *PlcClientArgs) *PlcClient {
+func NewIdentityResolver(args *IdentityResolverArgs) *IdentityResolver {
+	plcHost := "https://plc.directory"
+	if args.PlcHost != "" {
+		plcHost = args.PlcHost
+	}
+
 	client := robusthttp.NewClient(robusthttp.WithMaxRetries(2))
 	client.Timeout = 3 * time.Second
 
 	baseDirectory := identity.BaseDirectory{
-		PLCURL: "https://plc.directory",
+		PLCURL: plcHost,
 		HTTPClient: http.Client{
 			Timeout: time.Second * 5,
 		},
@@ -46,11 +51,11 @@ func NewPlcClient(args *PlcClientArgs) *PlcClient {
 		cacheSize.WithLabelValues("audit_log").Dec()
 	}, 1*time.Hour)
 
-	return &PlcClient{
+	return &IdentityResolver{
 		client:     client,
 		dir:        &directory,
 		auditCache: auditCache,
-		plcHost:    args.PlcHost,
+		plcHost:    plcHost,
 	}
 }
 
@@ -79,7 +84,7 @@ type DidAuditEntry struct {
 
 type DidAuditLog []DidAuditEntry
 
-func (c *PlcClient) GetIdentity(ctx context.Context, did string) (*identity.Identity, error) {
+func (c *IdentityResolver) GetIdentity(ctx context.Context, did string) (*identity.Identity, error) {
 	status := "error"
 
 	defer func() {
@@ -98,7 +103,7 @@ func (c *PlcClient) GetIdentity(ctx context.Context, did string) (*identity.Iden
 
 var ErrAuditLogNotFound = errors.New("audit log not found for DID")
 
-func (c *PlcClient) GetDIDAuditLog(ctx context.Context, did string) (*DidAuditEntry, error) {
+func (c *IdentityResolver) GetDIDAuditLog(ctx context.Context, did string) (*DidAuditEntry, error) {
 	status := "error"
 	cached := false
 
