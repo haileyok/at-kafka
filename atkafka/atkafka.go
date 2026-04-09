@@ -102,6 +102,19 @@ func NewServer(args *ServerArgs) (*Server, error) {
 		return nil, fmt.Errorf("you may only specify a list of watched collections _or_ ignored collections, not both")
 	}
 
+	if args.PlcHost != "" {
+		u, err := url.ParseRequestURI(args.PlcHost)
+		if err != nil {
+			return nil, fmt.Errorf("invalid PlcHost %q: %w", args.PlcHost, err)
+		}
+		if u.Scheme != "http" && u.Scheme != "https" {
+			return nil, fmt.Errorf("PlcHost must be http or https, got %q", u.Scheme)
+		}
+		if u.Host == "" {
+			return nil, fmt.Errorf("PlcHost missing host: %q", args.PlcHost)
+		}
+	}
+
 	identityResolver := NewIdentityResolver(&IdentityResolverArgs{
 		PlcHost: args.PlcHost,
 	})
