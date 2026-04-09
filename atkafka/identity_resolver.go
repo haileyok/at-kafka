@@ -61,7 +61,9 @@ func NewIdentityResolver(args *IdentityResolverArgs) *IdentityResolver {
 		client:     client,
 		dir:        &directory,
 		auditCache: auditCache,
-		plcHost:    plcHost,
+		// plcHost is stored without a trailing slash so URL construction
+		// in GetDIDAuditLog can reliably append path segments.
+		plcHost: strings.TrimRight(plcHost, "/"),
 	}
 }
 
@@ -127,7 +129,7 @@ func (c *IdentityResolver) GetDIDAuditLog(ctx context.Context, did syntax.DID) (
 		return val, nil
 	}
 
-	ustr := strings.TrimRight(c.plcHost, "/") + "/" + path.Join(did.String(), "log", "audit")
+	ustr := c.plcHost + "/" + path.Join(did.String(), "log", "audit")
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ustr, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create http request for DID audit log: %w", err)

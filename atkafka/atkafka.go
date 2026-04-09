@@ -108,7 +108,7 @@ func NewServer(args *ServerArgs) (*Server, error) {
 			return nil, fmt.Errorf("invalid PlcHost %q: %w", args.PlcHost, err)
 		}
 		if u.Scheme != "http" && u.Scheme != "https" {
-			return nil, fmt.Errorf("PlcHost must be http or https, not %q", u.Scheme)
+			return nil, fmt.Errorf("PlcHost must be http or https, got %q", u.Scheme)
 		}
 		if u.Host == "" {
 			return nil, fmt.Errorf("PlcHost missing host: %q", args.PlcHost)
