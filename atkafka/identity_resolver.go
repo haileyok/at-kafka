@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"path"
+	"strings"
 	"time"
 
 	"github.com/bluesky-social/indigo/atproto/identity"
@@ -125,7 +127,7 @@ func (c *IdentityResolver) GetDIDAuditLog(ctx context.Context, did syntax.DID) (
 		return val, nil
 	}
 
-	ustr := fmt.Sprintf("%s/%s/log/audit", c.plcHost, did.String())
+	ustr := strings.TrimRight(c.plcHost, "/") + "/" + path.Join(did.String(), "log", "audit")
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ustr, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create http request for DID audit log: %w", err)
